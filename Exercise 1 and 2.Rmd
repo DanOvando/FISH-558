@@ -1,0 +1,414 @@
+---
+title: "Exercise 1 and 2"
+author: "Dan Ovando"
+date: "FISH 558 Workshop 9/26/15"
+output: html_document
+---
+
+```{r process the data}
+
+rm(list = ls())
+set.seed(443)
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+
+library(gridExtra)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(knitr)
+
+lecture <- 'Workshop Day 2'
+
+basedir <- getwd()
+
+setwd(paste(getwd(),'/Fish 558 Workshop/',lecture, sep = ''))
+
+dat <- read.table("ex1.dat",
+                  header=TRUE)
+setwd(basedir)
+
+ggplot(dat,aes(Age,Length)) + geom_point()
+
+
+```
+
+## The likeliehood
+
+The likelihood function is 
+
+$$ L =  nlog(\sigma) + \sum_{l}(L_{predicted} - (L_{observed})^{2} / (2\sigma^ {2})) $$
+
+```{r functions}
+len_fun_one <- function(pars,dat,mode ='data')
+{
+  
+  linf <- pars[1]
+  
+  a50 <- pars[2]
+  
+  delta <- pars[3]
+  
+  sigma <- pars[4]
+  
+  n <- dim(dat)[1]
+  
+  la <- linf * (1 + exp(-log(19) * (dat$Age-a50)/delta))^-1 
+  
+  nll <- dim(dat)[1] * log(sigma) + sum((la - dat$Length)^2/(2*sigma^2))
+  
+  dat$l_fun_one <- la
+  
+  dat$nll <- nll
+  
+  output <- dat
+  
+  if (mode == 'optim')
+  {
+    output <- nll
+  }
+  
+  return(output)
+}
+
+
+len_fun_two <- function(pars,dat,mode ='data')
+{
+  
+  linf <- exp(pars[1])
+  
+  a0<- exp(pars[2])
+  
+  k <- exp(pars[3])
+  
+  sigma <- exp(pars[4])
+  
+  la <- linf * (1 - exp(-k * (dat$Age-a0))) 
+  
+  nll <- dim(dat)[1] * log(sigma) + sum((la - dat$Length)^2/(2*sigma^2))
+  
+  dat$l_fun_two <- la
+  
+  dat$nll <- nll
+  
+  output <- dat
+  
+  if (mode == 'optim')
+  {
+    output <- nll
+  }
+  
+  return(output)
+}
+
+
+opted_one <- optim(par = c(max(dat$Length),10,4,10),fn = len_fun_one, lower = c(0,0,0), upper = c( max(dat$Length) * 10, 20,30,20),dat = dat, mode = 'optim')
+
+dat1 <- len_fun_one(opted_one$par,dat = dat)
+
+ggplot(dat1,aes(Age,Length)) + geom_point() + geom_point(aes(Age,l_fun_one), color = 'blue')
+
+check <- len_fun_two(c(max(dat$Length),0,.1,10),dat = dat)
+
+opted_two <- nlminb(start = log(c(max(dat$Length),02,.07,25)),objective = len_fun_two,dat = dat, mode = 'optim')
+
+# opted_two <- optim(par = c(max(dat$Length),2,.07,25),fn = len_fun_two,dat = dat, mode = 'optim')
+
+dat2 <- len_fun_two(opted_two$par,dat = dat)
+
+(ggplot(dat2,aes(Age,Length)) + geom_point() + geom_line(aes(Age,l_fun_two,linetype = 'vonbert')) + geom_line(data = dat1,aes(Age,l_fun_one,linetype = 'logistic')) + 
+  theme(legend.title = element_blank()))
+
+
+aic_fun <- function(nll,n,p)
+{
+  
+  aic <- 2*nll + 2*p
+  
+  aic_corrected <- 2*nll + 2*p + (2*p*(p+1))/(n-p-1)
+  
+  
+  return(list(aic = aic,aic_corrected = aic_corrected))
+}
+
+logistic <- aic_fun(dat2$nll[1],dim(dat)[1],4)
+
+vonbert <- aic_fun(dat1$nll[1],dim(dat)[1],4)
+
+
+```  
+
+# Exercise 2
+
+```{r exercise 2}
+
+setwd(paste(getwd(),'/Fish 558 Workshop/',lecture, sep = ''))
+
+dat <- read.table("EX2R.dat",
+                  header=TRUE)
+setwd(basedir)
+
+kable(summary(dat))
+
+plot_dat <- gather(dat,'prey','prey_density',2:4) %>%
+  gather('consump','consump_rate',2:4) %>%
+  ggplot(aes(Predator,consump_rate,color = consump)) + geom_point()
+
+plot_dat
+
+
+pred_wrapper <- function(pars,preys,dat,form,mode,numpars)
+{
+  nlls <- matrix(NA,nrow = 1,ncol = length(preys))
+  
+  counter <- 1
+  
+  for ( p in 1:length(preys))
+  {
+    
+    par_locs <- counter:(counter+numpars -1)
+    
+    prey_pars <- pars[par_locs]
+    
+    nlls[p] <- pred_fun(prey_pars,dat,form,mode = 'optim',prey = preys[p])
+    
+    counter <- max(par_locs) + 1
+  }
+  
+  total_nll = sum(nlls, na.rm = T)
+  
+  return(total_nll)
+  
+}
+
+pred_fun <- function(params,dat,form,mode = 'plotting',prey)
+{
+  
+  prey_location <- which((colnames(dat) == paste('Prey',prey,sep = '')))
+  
+  consump_location <- which((colnames(dat) == paste('Consump',prey,sep = '')))
+  
+  filt_dat <- dat[,c(1,prey_location,consump_location)]
+  
+  if (form == 'linear')
+  {
+    a = params[1]
+    
+    pred_consump = a * filt_dat$Predator
+    
+    nll <- sum( (log(pred_consump) - log(filt_dat[,grepl('Consump',colnames(filt_dat))]))^2)
+    
+    filt_dat$predicted_consump <- pred_consump
+    
+    output = list(dat = filt_dat,nll = nll)
+    
+  }
+  
+  if (form == 'hollingtype2')
+  {
+    alpha = params[1]
+    
+    beta = params[2]
+    
+    prey_abundance <- filt_dat[,grepl('Prey',colnames(filt_dat))]
+    
+    pred_consump = (alpha * filt_dat$Predator)/(1 + beta * prey_abundance)
+    
+    nll <- sum( (log(pred_consump) - log(filt_dat[,grepl('Consump',colnames(filt_dat))]))^2)
+    
+    filt_dat$predicted_consump <- pred_consump
+    
+    output = list(dat = filt_dat,nll = nll)
+    
+  }
+  
+  if (form == 'sigmoid')
+  {
+    alpha = params[1]
+    
+    beta = params[2]
+    
+    gam = params[3]
+    
+    prey_abundance <- filt_dat[,grepl('Prey',colnames(filt_dat))]
+    
+    pred_consump <- ((alpha * filt_dat$Predator)*(prey_abundance)^(gam-1) ) / (1 + beta * (prey_abundance)^gam)
+    
+    nll <- sum( (log(pred_consump) - log(filt_dat[,grepl('Consump',colnames(filt_dat))]))^2)
+    
+    filt_dat$predicted_consump <- pred_consump
+    
+    output = list(dat = filt_dat,nll = nll)
+    
+  }
+  
+  if (form == 'sigmoid')
+  {
+    alpha = params[1]
+    
+    beta = params[2]
+    
+    gam = exp(params[3])
+    
+    prey_abundance <- filt_dat[,grepl('Prey',colnames(filt_dat))]
+    
+    pred_consump <- ((alpha * filt_dat$Predator)*(prey_abundance)^(gam-1) ) / (1 + beta * (prey_abundance)^gam)
+    
+    nll <- sum( (log(pred_consump) - log(filt_dat[,grepl('Consump',colnames(filt_dat))]))^2)
+    
+    filt_dat$predicted_consump <- pred_consump
+    
+    output = list(dat = filt_dat,nll = nll)
+    
+  }
+  if (form == 'pre_emption')
+  {
+    alpha = params[1]
+    
+    beta = params[2]
+    
+    gam = exp(params[3])
+    
+    prey_abundance <- filt_dat[,grepl('Prey',colnames(filt_dat))]
+    
+    pred_consump <- ((alpha * filt_dat$Predator)) / (1 + beta * (prey_abundance) + gam * filt_dat$Predator)
+    
+    nll <- sum( (log(pred_consump) - log(filt_dat[,grepl('Consump',colnames(filt_dat))]))^2)
+    
+    filt_dat$predicted_consump <- pred_consump
+    
+    output = list(dat = filt_dat,nll = nll)
+    
+  }
+  
+  if (mode == 'optim')
+  {
+    giveback <- output$nll
+  }
+  return(nll)
+}  
+
+loop_optim <- function(guess,tolerance = 0.01,form,numpars,preys)
+{
+  
+  old_nll <- 100
+  
+  difference <- 100
+  
+  while( difference > tolerance)
+  {
+    
+    opted = optim(par = guess, fn = pred_wrapper,dat = dat, mode = 'optim',prey =preys, form = form,numpars = numpars)
+    show(opted$value)
+    show(tolerance)
+    difference = sum((old_nll - opted$value)^2)
+    
+    old_nll <- opted$value
+    
+    guess <- opted$par
+  }
+  
+  return(opted)
+}
+
+pred_wrapper(c(1,1.5,.3),preys = 1:3,dat = dat, form = 'linear',mode = 'optim',numpars = 1)
+
+linear <- optim(par = c(1,1.5,.5), fn = pred_wrapper,dat = dat, mode = 'optim',prey =1:3, form = 'linear',numpars = 1)
+
+linear <-loop_optim(c(1,1.5,.5),form = 'linear', numpars = 1,preys = 1:3)
+
+holling <-loop_optim(c(1,1,1.5,1,.3,1),form = 'hollingtype2', numpars = 2,preys = 1:3)
+
+guess <- rep(.1,9)
+
+sigmoid <-loop_optim(guess,form = 'sigmoid', numpars = 3,preys = 1:3)
+
+pre_emption <-loop_optim(guess,form = 'pre_emption', numpars = 3,preys = 1:3,tolerance = 0.001)
+
+
+```
+## Linear model
+```{r}
+
+show(linear)
+```
+
+## Holling model
+```{r}
+
+show(holling)
+```
+
+## Sigmoid
+```{r}
+show(sigmoid)
+```
+
+## pre-emption
+```{r}
+show(pre_emption)
+```
+
+# States of Nature
+```{r}
+
+scenes <- expand.grid(r = c(.1,.2,.3),k = c(1000,2000,3000),h = c(.05,.1,.15))
+
+scenes$state <- 1:dim(scenes)[1]
+
+time <- 21
+
+blank <- as.data.frame(matrix(NA,nrow = time,ncol = 7))
+
+colnames(blank) <- c('y','b','catch','r','k','h','state')
+
+schaefer_proj <- function(s,scenes,b0,time = 20,blank)
+{
+  
+  scene <- scenes[s,]
+  
+  blank$b[1] <- scene$k * .2
+  
+  for (t in 2:time)
+  {
+    
+    cb <- blank$b[t-1]
+    
+    catch <- cb*scene$h
+    blank$catch[t-1] <- catch
+    
+    nb <- cb + scene$r * cb * (1 - cb / scene$k) - catch
+    
+    blank[t,] <- data.frame(t,nb,0,scene)
+  }
+  
+  
+  return(blank)
+  
+}
+
+sims <- lapply(1:dim(scenes)[1],schaefer_proj,time = time,scenes = scenes,blank = blank) %>% ldply() %>% subset(y == time)
+
+sims$bvk <- sims$b/sims$k
+
+sims$msy <- with(sims, r*k/4)
+
+sims$fmsy <- with(sims, r/2)
+
+sims$name <- paste('r = ',sims$r,'-', 'k = ',sims$k,sep = '') 
+
+# table <- sims %>%
+#   seperate(r,c('low))
+
+
+(ggplot(sims,aes(x = r,y = k,fill = bvk)) + geom_tile() + facet_grid(~h) + scale_fill_gradient(low = 'red',high = 'green'))
+
+(ggplot(sims,aes(x = r,y = h,fill = bvk)) + geom_tile() + scale_fill_gradient(low = 'red',high = 'green'))
+
+
+```
+
+The take home, K doesn't matter!
+
+
+

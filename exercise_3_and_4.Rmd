@@ -1,0 +1,228 @@
+---
+title: "Exercise 3 and 4"
+author: "Dan Ovando"
+date: "September 27, 2015"
+output: html_document
+---
+
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+
+```
+
+```{r set things up}
+
+rm(list = ls())
+set.seed(448)
+library(gridExtra,quietly = T)
+library(ggplot2, quietly = T)
+library(plyr, quietly = T)
+library(dplyr, quietly = T)
+library(tidyr, quietly = T)
+library(knitr, quietly = T)
+
+```
+
+# Sample Importance Resampling - Example 3 with Grey Whales
+
+The problem here is that we don't believe the standard errors 
+
+```{r SIR example}
+
+
+# =================================================================================
+
+DoSir <- function(Nout=1000,Model,DropYears = NA)
+{
+  
+  # Read in the basic data
+  TheData <- ReadData(DropYears)
+  Yr1 <- TheData$CatchYr[1]
+  Catch <- TheData$CatchVal
+  SurveyEst <- TheData$SurveyEst
+  SurveyCV <- TheData$SurveyCV
+  SurveyYr <- TheData$SurveyYr
+  Nyears <- length(Catch)
+  years <- TheData$CatchYr
+  time  <- length(years)
+  # Storage for the parameters and the final depletion
+  #   Vals <- as.data.frame(matrix(0,ncol=6,nrow=Nout))
+  
+  Vals <- list()
+  
+  # Storage for the total likelihood encountered in the first stage sampling
+  # and the number of draws
+  AveLike <- 0
+  Ntest <- 0
+  
+  # Reset parameters for SIR
+  Threshold <- exp(0)
+  Cumu <- 0
+  Ndone <- 0
+  
+  output <- (matrix(NA,nrow = (time),ncol = 1))
+  colnames(output) <- 'n'
+  while (Ndone < Nout)
+  {
+    # Generate from priors
+    
+    r <- runif(1,0,.15)
+    
+    Pop1965 <- runif(1,10000,15000)
+    
+    AddCV <- runif(1,.1,.2)
+    
+    K <- runif(1,20000,50000)
+    
+    # Call the population model
+    Pop <- PopModel(Catch = Catch,r = r,K = K,years = years,InitPop = Pop1965,ExponModel = Model,output = output)
+    
+    #     survey <- data.frame(TheData$SurveyYr,TheData$SurveyEst,TheData$SurveyCV)
+    # 
+    #     colnames(survey) <- c('year','SurveyEst','SurveyCV')
+    # 
+    #     Pop <- join(Pop,survey, by = 'year')
+    
+    #     ggplot(Pop,aes(year,n)) + geom_point() + geom_line(aes(year,SurveyEst))
+    #
+    
+    #write the pop model
+    # Compute the negative log-likelihood and hence the likelihood
+    NegLogLike <- Likelihood(Pop = Pop,SurveyYr-Yr1+1,SurveyEst,SurveyCV,AddCV)
+    TheLike <- exp(-1*NegLogLike-32.19)
+    
+    # Determine if a parameter vector is to be saved
+    Cumu <- Cumu + TheLike
+    
+    AveLike <- AveLike + TheLike
+    Ntest <- Ntest +1
+    
+    while (Cumu > Threshold & Ndone < Nout)
+    {
+      Ndone <- Ndone + 1
+      show(Ndone)
+      Cumu <- Cumu - Threshold
+      Vals[[Ndone]] <- data.frame(Ndone,years,K,r,Pop1965,AddCV,NegLogLike,Pop,(Pop/K))
+      
+    }
+  }
+  
+  Vals <- ldply(Vals)
+  
+  colnames(Vals) <- c('iteration','year','K','r','Pop1965','AddCV','NegLogLike','Pop','NvK')
+  
+  Vals$AveLike <- AveLike/Ntest
+  
+  return(Vals)
+}
+
+# =================================================================================
+
+Likelihood <- function(Pop,SurveyYr,SurveyEst,SurveyCV,AddCV)
+{
+  # Account for the additional CV
+  UseCV <- sqrt(SurveyCV^2+AddCV^2)
+  
+  # Extract the predictions corresponding to the observations and compute the negatuve log-likelihood
+  Preds <- Pop[SurveyYr]
+  Residuals <- log(UseCV)+0.5*(log(Preds)-log(SurveyEst))^2/UseCV^2
+  LogLike <- sum(Residuals)
+}
+
+# =================================================================================
+PopModel <- function(Catch,r,K,years,InitPop,ExponModel,output)
+{
+  
+  time <- length(years)
+  
+  #   colnames(output) <- c('year','catch','n')
+  
+  #   output$catch <- Catch
+  
+  output[1,1] <- InitPop
+  
+  #   output$year <- years
+  
+  if (ExponModel == 'ExponModel')
+  {
+    
+    for (t in 2:time)
+    {
+      
+      output[t,1] <- (1+r)*output[t-1,1] - Catch[t-1]
+      #             output$n[t] <- pmax(1e-5,(1+r)*output$n[t-1] - output$catch[t-1])
+      
+      
+    }
+    
+  }
+  if (ExponModel == 'Schaefer')
+  {
+    
+    for (t in 2:time)
+    {
+      output[t,1] <- pmax(1e-5,output[t-1,1] + (output[t-1,1]*r)*(1-output[t-1]/K) - Catch[t-1])
+    }
+    
+  }
+  
+  return(output)
+}
+
+# =================================================================================
+ReadData <- function(DropYears)
+{
+  lecture <- 'Workshop Day 3'
+  TheData1 <- read.csv(paste('Fish 558 Workshop/',lecture,'/Ex3a.csv', sep = ''),header=TRUE, stringsAsFactors = F)
+  
+  colnames(TheData1) <- c('year','pop','cv')
+  
+  TheData2 <- read.csv(paste('Fish 558 Workshop/',lecture,'/Ex3b.csv', sep = ''),header=TRUE, stringsAsFactors = F)
+  
+  colnames(TheData2) <- c('year','thing')
+  
+  if (class(DropYears) == 'numeric')
+  {
+    TheData1 <- subset(TheData1,!(year %in% DropYears))
+#     TheData2 <- subset(TheData2,!(year %in% DropYears))
+    
+  }
+  
+  
+  Outs <- NULL
+  Outs$SurveyYr <- TheData1[,1]
+  Outs$SurveyEst <- TheData1[,2]
+  Outs$SurveyCV <- TheData1[,3]
+  Outs$CatchYr <- TheData2[,1]
+  Outs$CatchVal <- TheData2[,2]
+  return(Outs)
+}
+
+# =================================================================================
+set.seed(443)
+
+ExpoModel <- DoSir(Nout=200,Model= 'ExponModel')
+
+SchModel <- DoSir(Nout=200,Model='Schaefer')
+
+SchModel_drop <- DoSir(Nout=200,Model='Schaefer', DropYears = c(2001,2002))
+
+ExpoModel_drop <- DoSir(Nout=200,Model='ExponModel', DropYears = c(2001,2002))
+
+
+ggplot(subset(SchModel, year == max(year)),aes(x = K,y = r)) + geom_point(aes(fill = NegLogLike), shape = 21, size = 2) + scale_fill_gradient(low = 'green',high = 'red')
+
+
+SchModel$NearK <- SchModel$NvK >= 0.9
+
+prob_recovered <- mean(SchModel$NearK[SchModel$year == max(SchModel$year)], na.rm = T)
+
+```
+
+So, the bayes factor for the schaefer model is `r mean(SchModel$AveLike)/mean(ExpoModel$AveLike)`. This means that the probability of the *Schaefer* model is `r mean(SchModel$AveLike)/(mean(SchModel$AveLike) + mean(ExpoModel$AveLike))` while the probability of the *Exponential* model is `r mean(ExpoModel$AveLike)/(mean(SchModel$AveLike) + mean(ExpoModel$AveLike))` . 
+
+The bayes factor for the schaefer model without 2001 2002 relative to the exponential model is `r mean(SchModel_drop$AveLike)/mean(ExpoModel_drop$AveLike)`.while the probability of the *Schaefer* model with less years is `r mean(SchModel_drop$AveLike)/(mean(ExpoModel_drop$AveLike) + mean(SchModel_drop$AveLike))` . 
+
+The probability of the popuataltion begin >= 90% of *K* in `r max(Year)` is `r 100*prob_recovered`%

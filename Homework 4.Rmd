@@ -1,0 +1,285 @@
+---
+title: "FISH 558 Homework 2 - Lesser Problemfish"
+author: "Dan Ovando"
+date: "September 28, 2015"
+output:
+  pdf_document:
+    fig_caption: yes
+  html_document:
+    fig_caption: yes
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, setup}
+rm(list = ls())
+set.seed(123456)
+
+source('FISH 558 Functions/do_schaefer_sir.R')
+source('FISH 558 Functions/schaefer_grid_search.R')
+source('FISH 558 Functions/schaefer_SIR_model.R')
+
+library(mvtnorm)
+library(stats4)
+library(MASS)
+library(coda)
+library(tcltk2)
+library(gridExtra,quietly = T)
+library(ggplot2, quietly = T)
+library(plyr, quietly = T)
+library(dplyr, quietly = T)
+library(tidyr, quietly = T)
+library(knitr, quietly = T)
+library(coda, quietly = T)
+library(ggmcmc)
+library(parallel)
+```
+# Part 1:
+
+Fit a Schaefer model of the lesser spotted problemfish (Fig.1), using the data summarized below. 
+
+![Scientific illustration of the lesser spotted problemfish](babelfish.jpg)
+
+```{r}
+# sapply(list.files(pattern="[.]R$", path="FISH 558 Functions", full.names=TRUE), source)
+
+dat <- read.csv('FISH 558 Workshop/Workshop Day 4/Homework Day4.csv',stringsAsFactors = F,header = F)
+
+colnames(dat) <- c('year','catch','catch.rate')
+
+(ggplot(gather(dat,'data','value',2:3), aes(year,value, fill = data)) + geom_point(shape = 21) + facet_grid(data~., scales = 'free'))
+
+kable(summary(dat))
+
+# Set Up Priors
+# 
+samps <- 200
+
+Part1 <- DoSir(Nout=samps,dat = dat)
+
+Part2 <- DoSir(Nout=samps,dat = dat,phi.manual = 1)
+```
+
+```{r, fig.cap='The Marginal Posterior Probability of Current Depletion using SIR'}
+ggplot(Part1,aes(x = BvK)) + geom_density(fill = 'steelblue2') + xlab('Current Biomass relative to K')
+```
+
+```{r, fig.cap='The Marginal Posterior Probability of r using SIR'}
+ggplot(Part1,aes(x = r)) + geom_density(fill = 'steelblue2')
+```
+
+```{r, fig.cap='The Marginal Posterior Probability of K using SIR'}
+ggplot(Part1,aes(x = K)) + geom_density(fill = 'steelblue2')
+
+grid_space <- 50
+
+```
+
+The  posterior probability (using SIR) for the schafer model of the lesser problemfish in which $\phi$ is free is `r Part1$AveLike[1] / (Part2$AveLike[1] + Part1$AveLike[1])`, and `r Part2$AveLike[1] / (Part2$AveLike[1] + Part1$AveLike[1])` for the model in which $\phi$ is fixed at 1. This suggests that there is slightly more support for the model with the free $\phi$, though the bayes factor for the free model is quite low (`r Part1$AveLike[1]/Part2$AveLike[1]`), suggesting only slight favor for the free $\phi$ model. 
+
+# Grid Search
+
+We repeat the above fitting of the lesser problemfish model (with $\phi = 1$) using a grid search routine (grid spacing of `r grid_space`). Results are quite similar to the estimates produced by SIR
+
+```{r, fig.cap='The Marginal Posterior Probability of r using the grid search'}
+grid <- schaefer_grid_search(dat = dat,grid_space = grid_space)
+
+(ggplot(grid$r_like,aes(r,marg_like)) + geom_point() + xlab('r') + ylab('Marginal Posterior Probability'))
+```
+
+```{r, fig.cap='The Marginal Posterior Probability of K using the grid search'}
+(ggplot(grid$k_like,aes(k,marg_like)) + geom_point() + xlab('K') + ylab('Marginal Posterior Probability'))
+```
+
+```{r, fig.cap='The Joint Posterior Probability of r and K using the Grid Search'}
+persp(x = unique(grid$grid$r), y = unique(grid$grid$k), z = matrix(grid$grid$norm_posterior,nrow = grid_space, ncol = grid_space), xlab = 'r', ylab = 'k',zlab = 'Joint Posterior Probability',scale = T)
+```
+
+The end of homeworks. 
+
+# Functions
+
+Functions used below
+
+```{r, echo=T}
+
+DoSir <- function(Nout=1000,dat,r.manual = NA, K.manual = NA, phi.manual = NA,progbar = F)
+{
+  if (progbar == T)
+  {
+    pb <- txtProgressBar(min = 1, max = Nout, style = 3)
+  }
+  # Read in the basic data
+  Yr1 <- dat$year[1]
+  Catch <- dat$catch
+  SurveyEst <- dat$catch.rate
+  Nyears <- length(Catch)
+  years <- dat$year
+
+  # Storage for the parameters and the final depletion
+  Vals <- as.data.frame(matrix(0,ncol=6,nrow=Nout))
+
+  colnames(Vals) <- c('K','r','phi','sigma','biomass','thelike')
+  # Storage for the total likelihood encountered in the first stage sampling
+  # and the number of draws
+  AveLike <- 0
+  Ntest <- 0
+
+  # Reset parameters for SIR
+  Threshold <- exp(-77)
+  Cumu <- 0
+  Ndone <- 0
+  while (Ndone < Nout)
+  {
+    # Generate from priors
+    if (is.na(r.manual))
+    {
+      r <- runif(1,.15,.45)
+    }
+    if (is.na(phi.manual))
+    {
+      phi <- runif(1,0.8,1.2)
+    }
+    if (class(phi.manual) == 'numeric')
+    {
+      phi <- phi.manual
+    }
+    #     AddCV <- runif(1,.1,.2)
+    if (is.na(K.manual))
+    {
+      K <- runif(1,5000,8000)
+    }
+
+    Pop <- schaefer.model(pars = log(c(r,K,phi)),dat = dat,time = years, mode = 'popmodel')
+
+    TheLike <- Pop$total_like[1]  #exp(-1*NegLogLike-32.19)
+
+    Cumu <- Cumu + TheLike
+
+    AveLike <- AveLike + TheLike
+
+    Ntest <- Ntest +1
+    while (Cumu > Threshold & Ndone < Nout) #check and see if cumulative likelihood is over threshold
+    {
+      Ndone <- Ndone + 1
+
+      if (progbar == T)
+      {
+      setTxtProgressBar(pb, Ndone)
+      }
+
+      Cumu <- Cumu - Threshold
+      Vals[Ndone,] <- data.frame(K,r,phi,Pop$sigma,last(Pop$biomass),TheLike)
+
+    }
+  }
+
+  Vals$AveLike <- AveLike/Ntest
+
+  Vals$BvK <- Vals$biomass/Vals$K
+  return(Vals)
+}
+
+schaefer_grid_search <- function(grid_space = 5,lower_r = .15,upper_r = .45,lower_k = 5000,upper_k = 8000,
+                                 lower_phi = .8,upper_phi = 1.2,sigma = 0.1,dat)
+{
+
+  r_grid = seq(lower_r,upper_r,length.out = grid_space)
+
+  k_grid <- seq(lower_k,upper_k,length.out = grid_space)
+
+#   phi_grid <- seq(lower_phi,upper_phi,length.out = grid_space)
+
+  years <- dat$year
+
+  grid <- expand.grid(r = r_grid,k = k_grid,year = years) # create matrix of factorial combinations of alpha and o1968
+
+  call.pop <- function(i,grid,dat,time)
+  {
+    pars <- log(c(grid$r[i], grid$k[i],1))
+    outpop <- schaefer.model(pars,dat,time,mode = 'pop')
+    return(outpop)
+  }
+
+  Pops <- lapply(1:dim(grid)[1],call.pop,grid = grid, dat = dat,time = dim(dat)[1]) %>% ldply()
+
+  #   grid$pophat <- with(grid,p1968 * exp(alpha * (year - 1968))) #predict whale population in each year
+
+  #   grid <- join(grid,dat,by = 'year') #add in observed data
+
+  grid <- Pops %>%
+    ungroup() %>%
+    group_by(r,k) %>%
+    summarize(total_like = mean(total_like)) %>% #Get total likelihood across all years for each alpha and p1968
+    ungroup() %>%
+    #     mutate(prior = dnorm(alpha,mean = .04,sd = .01) * dnorm(p1968,mean = 12000,sd = 1000)) %>% #calculate prior
+    #     mutate(posterior = prior * total_like, norm_posterior = posterior/sum(posterior)) #calculate the normlized posterior
+    mutate(posterior = total_like, norm_posterior = posterior/sum(posterior)) #calculate the normlized posterior
+  # Marginal likelihood of alpha
+  r_like <- grid %>%
+    group_by(r) %>%
+    summarize(marg_like = sum(norm_posterior))
+
+  # Marginal likelihood of p1968
+  k_like <- grid %>%
+    group_by(k) %>%
+    summarize(marg_like = sum(norm_posterior))
+
+  return(list(grid = grid, r_like = r_like,k_like = k_like))
+}
+
+schaefer.model <- function(pars,dat,time,mode = 'optim')
+{
+  #   r,k,phi
+
+  r <- exp(pars[1])
+
+  k <- exp(pars[2])
+
+  phi <- exp(pars[3])
+
+  time <- dim(dat)[1]
+
+  dat$k <- k #runif(1,500,8000)
+
+  dat$phi <- phi #runif(1,0.8,1.2)
+
+  dat$r <- r #runif(1,.15,.45)
+
+  dat$biomass[1] <- dat$phi[1] * dat$k[1]
+
+  for (t in 2:time)
+  {
+
+    dat$biomass[t] <- pmax(1e-8,with(dat,biomass[t-1] + biomass[t-1] * r[t-1] * (1 - biomass[t-1]/k[t-1]) - catch[t-1]))
+
+  }
+
+  dat$q <- exp(1/time * sum(  log(dat$catch.rate / dat$biomass)))
+
+  dat$index <- dat$biomass * dat$q
+
+  dat$sigma <- sqrt(1/time * sum( (log(dat$catch.rate) - log(dat$q*dat$biomass))^2))
+
+  dat$thelike <- with(dat,{
+    (1/(sqrt(2*pi)*sigma*catch.rate)* exp(- (log(catch.rate) - log(index))^2 / (2*sigma^2)))
+    #     log(sigma * catch.rate) + (log(catch.rate) - log(index))^2 / (2*sigma^2)
+
+  }
+  )
+
+  dat$total_like <- prod(dat$thelike)
+
+  output <- dat
+  if (mode == 'optim')
+  {
+    output <- as.numeric(dat$total_like[1])
+  }
+
+  return(output)
+}
+
+```
+

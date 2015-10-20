@@ -1,0 +1,438 @@
+---
+title: "FISH 558 Homework 1 - Fin Whales"
+author: "Dan Ovando"
+date: "October 6, 2015"
+output:
+  pdf_document:
+    fig_caption: yes
+    fig_height: 5
+    fig_width: 6
+  html_document:
+    fig_align: center
+    fig_caption: yes
+    fig_height: 5
+    fig_width: 5
+---
+
+```{r global_options, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+# The Model
+
+Our goal for this assignment is to fit a population model for North Atlantic fin whales (*Balaenoptera physalus*), using data on the total numbers of whales fished, along with an index of population abundance (Fig.1). 
+
+We fit the data using a the Pella-Tomlinson production model
+
+$$N_{t+1} = N_{t} + rN_{t}(1-(\frac{N_{t}}{K})^{z}) - c_{t}$$
+
+Where *N* is numbers of whales, *K* is the carrying capacity of whale numbers, *r* is a growth rate parameter, and *z* controls the shape of the production model. Specifically, we set *z* to 2.39, such that N~MSY~, the numbers of whales in the population when fished at MSY to equilibrium,  is 0.6K.
+
+We fit the model using maximum-likelihood estimation, where the likelihood is defined as 
+
+$$C\prod_{t} \frac{1}{\sigma_{t}}e^{-\frac{(log(N^{pred}_t) - log(N^{obs}_t))^{2}} {(2\sigma_{t}^{2})}}$$
+
+where *N^pred^* and *N^obs^* are respectively the predicted and observed abundances of whales, $\sigma$ is the standard deviation of the observation error, defined as 
+
+$$ \sigma_{t} = \sqrt{\mu^{2} + \tau^{2}}$$
+
+where $\mu$ is the CV of the whale observations, and $tau$ is an additional variance parameter to be estimated by the model. 
+
+We use this model to estimate *r*, *K*, and $\tau$, and to consider the likelihood profile of the ratio of MSY to N~MSY~ (*MSYR*). 
+
+```{r load data, fig.cap='Catches and observed abundances of fin whales'}
+
+set.seed(243)
+
+library(plyr)
+library(dplyr)
+library(stats4)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(scales)
+library(grid)
+library(broom)
+library(knitr)
+
+catch.dat <- read.csv('Fish 558 Homeworks/hwk1_catch_data.csv',stringsAsFactors = F) %>%
+  dplyr::select(year,catch)
+
+survey.dat <- read.csv('Fish 558 Homeworks/hwk1_survey_data.csv',stringsAsFactors = F)
+
+whale.dat <- full_join(catch.dat,survey.dat,by = 'year')
+
+# kable(whale.dat, caption = 'North Atlantic fin whale data')
+
+whale.plot <- whale.dat %>%
+  gather('data','value',2:3)
+
+mf_labeller <- function(var, value){
+  value <- as.character(value)
+  if (var=="data") {
+    value[value=="catch"] <- "Catch"
+    value[value=="n"]   <- "Abundance Estimate"
+  }
+  return(value)
+}
+
+
+data.plot <- ggplot(whale.plot,aes(year,value, color = data,shape = data)) +
+  geom_point(size = 2) +
+  scale_color_discrete(name=element_blank(),
+                       breaks=c("catch", "n"),
+                       labels=c("Catch", "Abundance Estimate")) +
+  scale_shape_discrete(name=element_blank(),
+                       breaks=c("catch", "n"),
+                       labels=c("Catch", "Abundance Estimate")) + 
+  ylab('Numbers') + 
+  theme(legend.position = 'top')
+data.plot
+
+```
+
+# The Tasks
+
+## A.
+
+Show that the ratio of MSY to N~MSY~ is equal to 0.705r
+
+We know that since *z* = 2.39, N~MSY~ is 0.6K
+
+We also know that at steady state, N~t+1~ = N~t~
+
+So, plugging N~t~ in for N~t+1~, solving for C at MSY, and replacing N~t~ with 0.6K we get
+
+$$ c = (0.6rK)(1 - 0.6^{z})  = MSY $$
+
+$$ MSY = 0.6rK(0.7050275) $$
+
+And since N~MSY~ = 0.6K, 
+
+$$\frac{MSY}{N_{MSY}} = r0.7050275$$
+
+## B.
+
+
+We first performed a grid search across *r* (~U[.001,1]), *K* (~U[600,1300]), and $\tau$ (~U[1e-3,10]) to find initial starting guesses for these parameters (Fig.2).  
+
+```{r, fig.cap='Grid search derived marginal likelihoods (ML) for parameters of interest'}
+
+whale.grid <- expand.grid(r = seq(1e-2,2,length.out = 25),
+                          k = seq(600,1300,length.out = 25),
+                          tau = seq(1e-3,10,length.out = 10) )
+
+pella.tom.gridmodel <- function(g,grid,z = 2.39,dat){
+  #Grid search pella tomlinson model
+  r <- grid$r[g]
+  
+  k <- grid$k[g]
+  
+  tau <- grid$tau[g]
+  
+  dat$nhat[1] <- k
+  
+  dat$sigma <- sqrt(dat$u^2 + tau^2)
+  
+  for (t in 2:dim(dat)[1]) #Simulate population forward
+  {
+    last.n <- dat$nhat[t-1]
+    
+    dat$nhat[t] <- pmax(last.n + (last.n * r) * (1- (last.n/k)^z) - dat$catch[t-1],0.0001)
+  }
+  
+  # Calculate likelihoods
+  dat$likelihood <- 1/dat$sigma * exp( - (log(dat$nhat) - log(dat$n))^2/(2*dat$sigma^2))
+  
+  dat$nll <- -log(1/dat$sigma) + (log(dat$nhat) - log(dat$n))^2/(2*dat$sigma^2)
+  
+  output <- data.frame(grid[g,],likelihood = prod(dat$likelihood, na.rm = T),nll = sum((dat$nll),na.rm = T))
+  
+  return(output)
+}
+
+
+whale.gridsearch<- lapply(1:dim(whale.grid)[1],pella.tom.gridmodel, grid = whale.grid, dat = whale.dat) %>%
+  ldply() %>%
+  ungroup() %>%
+  mutate(norm_like = exp(-nll)/sum(exp(-nll), na.rm = T),msyr = 0.705 * r) #%>%
+
+r_profile <- whale.gridsearch %>%
+  group_by(r) %>%
+  summarize(marg_like = sum(norm_like, na.rm = T)) %>%
+  ggplot(aes(r,marg_like)) + 
+  geom_point() +
+  ylab('ML') + 
+  theme(text = element_text(size = 8))
+
+r_k_profile <- whale.gridsearch %>%
+  group_by(r,k) %>%
+  summarize(marg_like = sum(norm_like)) %>%
+  ggplot(aes(r,k,fill = marg_like)) + 
+  geom_tile() + 
+  scale_fill_continuous(name = 'ML') + 
+    theme(text = element_text(size = 8))
+
+
+msyr_profile <- whale.gridsearch %>%
+  group_by(msyr) %>%
+  summarize(marg_like = sum(norm_like)) %>%
+  ggplot(aes(msyr,marg_like)) + 
+  geom_point() + 
+  ylab('ML') + 
+    theme(text = element_text(size = 8))
+
+
+
+k_profile <- whale.gridsearch %>%
+  group_by(k) %>%
+  summarize(marg_like = sum(norm_like)) %>%
+  ggplot(aes(k,marg_like)) + 
+  geom_point() + 
+  ylab('ML') + 
+    theme(text = element_text(size = 8))
+
+
+
+tau_profile <- whale.gridsearch %>%
+  group_by(tau) %>%
+  summarize(marg_like = sum(norm_like)) %>%
+  ggplot(aes(tau,marg_like)) + 
+  geom_point() + 
+  ylab('ML') + 
+    theme(text = element_text(size = 8))
+
+
+
+grid.arrange(r_k_profile,r_profile,msyr_profile,k_profile,tau_profile,nrow = 3,ncol = 2)
+
+best_r <- r_profile$data$r[r_profile$data$marg_like == max(r_profile$data$marg_like)][1]
+
+best_k <- k_profile$data$k[k_profile$data$marg_like == max(k_profile$data$marg_like)][1]
+
+best_tau <- tau_profile$data$tau[tau_profile$data$marg_like == max(tau_profile$data$marg_like)][1]
+```
+
+This grid search resulted in initial starting guesses of *r* = `r best_r`, *K* = `r best_k`, and $\tau$ = `r best_tau`. These starting guesses were then passed to MLE to tune "best" estimates of our parameters. We also ran MLE using different starting guesses (*r* = `r best_r/2`, *K* = `r 2*best_k`, and $\tau$ = `r best_tau/2`) to explore the sensitivity of MLE to initial parameters. 
+
+```{r fit the model}
+fit.whale.model <- function(r,k,tau,b0,z,dat,use = 0){
+  #function to fit whale model using MEL
+  k <- exp(k)
+  
+  tau <- exp(tau)
+  
+  dat$nhat <- (pella.tom.model(r = r, k = k, b0 = k,z = 2.39,catch = dat$catch, time = dim(dat)[1]))
+  
+  dat$sigma <- sqrt(dat$u ^2 + tau ^ 2)
+  
+  dat$nll <- -log(1/dat$sigma) + ( log(dat$nhat) - log(dat$n) )^2 / (2 * dat$sigma^2)
+  if (use == '0')
+  {
+    #     output <- -sum(dnorm(dat$n,mean = dat$nhat, sd = dat$sigma, log = T), na.rm = T)
+    output <- (as.numeric(sum(dat$nll, na.rm = T)))
+  }
+  if (use != '0'){
+    output <- dat
+  }
+  return(output)
+}
+
+fit.whale.model2 <- function(pars,b0 = NA,z = 2.39,dat,use = 'optim'){
+  #function to fit whale model using optim, since MLE fails horribly sometimes
+  r <- pars[1]
+  k <- pars[2]
+  tau <- pars[3]
+  
+  dat$nhat <- (pella.tom.model(r = r, k = k, b0 = k,z = z,catch = dat$catch, time = dim(dat)[1]))
+  
+  dat$sigma <- sqrt(dat$u ^2 + tau ^ 2)
+  
+  dat$nll <- -log(1/dat$sigma) + ( log(dat$nhat) - log(dat$n) )^2 / (2 * dat$sigma^2)
+  
+  dat$likelihood <- 1/dat$sigma * exp( - (log(dat$nhat) - log (dat$n))^2/(2*dat$sigma^2))
+ 
+  if (use == 'optim')
+  {
+    output <- (as.numeric(sum(dat$nll, na.rm = T)))
+  }
+  if (use != 'optim'){
+    output <- dat
+  }
+  return(output)
+}
+
+pella.tom.model <- function(r,k,b0,z,catch,time){
+#population model
+  b <-   matrix(NA,nrow = time,ncol = 1)
+  
+  b[1] <- b0
+  
+  for (t in 2:time)
+  {
+    last.b <- b[t-1]
+    
+    b[t] <- pmax(last.b + (last.b * r)* (1- (last.b/k)^z) - catch[t-1],0.0001)
+  }
+  
+
+  return(b)
+}
+
+fitted.whale <- fit.whale.model2(pars = c(best_r,best_k,best_tau),dat = whale.dat,use = 'project')
+
+# ggplot(fitted.whale,aes(year,n)) +
+#   geom_point(aes(fill = 'Observed')) +
+#   geom_line(aes(year,nhat,color = 'Predicted')) +
+#   theme(legend.title = element_blank()) +
+#   xlab('Year') +
+#   ylab('Number of Fin Whales')
+
+whale.fit2 <- nlminb(start = c(best_r/2,best_k*2,best_tau/2),fit.whale.model2,dat = whale.dat)
+
+# lastlike <- 10
+newlike <- 100
+lastlike <- 1000
+best_k <- log(best_k)
+best_tau <- log(best_tau)
+while (newlike < lastlike) #jitter over MLE to find best fit
+{
+  newfit <- try(mle(fit.whale.model,start = list(r = best_r,k = (best_k), tau = (best_tau)),fixed = list(z = 2.39,b0 = NA,dat =whale.dat), nobs = sum(is.na(whale.dat$n) == F)),silent = T)
+  
+  if (class(newfit) != 'try-error')
+  {
+    fit <- newfit
+    
+  newlike <-  -(as.numeric(logLik(fit)))
+  
+  best_r <- jitter(as.numeric(coef(fit)['r']))
+  
+  best_k <- jitter(as.numeric(coef(fit)['k']))
+  
+  best_tau <- jitter(as.numeric(coef(fit)['tau']))
+  
+  lastlike <- newlike
+  }
+}
+
+fitted.whale <- fit.whale.model2(pars = whale.fit2$par,dat = whale.dat,use = 'model')
+
+fitted.whale.mle <- fit.whale.model2(pars = c(coef(fit)['r'],exp(coef(fit)['k']),exp(coef(fit)['tau'])),dat = whale.dat,use = 'model')
+# show((summary(fit)))
+
+```
+
+Using the grid search starting guess for MLE, we obtain the following "best" estimates of our parameters of interest (Table.1), with a negative log likelihood of `r -as.numeric(logLik(fit))`
+
+```{r, summarize MLE}
+
+mle.results <- data.frame(Coefficient = coef(fit)[1:3])
+
+mle.results[2:3,1] <- exp(mle.results[2:3,1])
+                          
+#,Standard.Error = sqrt(diag(vcov(fit))))
+
+kable(mle.results, digits = 2, caption = 'Summary of "best" model parameters')
+
+```
+
+The results in Table.1 suggest an odd result: a value of r of `r round(best_r,2)` seems exceedingly high for whales. Looking at the fits to the data (Fig.3), we see an explanation for this. With an *r* this high, the model becomes chaotic, resulting in a good fit to the observed abundances somewhat through chance, as chaotic fluctuations in the predicted abundances happen to coincide with the data.  
+
+```{r,fig.cap='Fit of best model estimates'}
+
+ggplot(fitted.whale.mle,aes(year,n)) +
+  geom_point(aes(fill = 'Observed'),size = 2) +
+  geom_line(aes(year,nhat,color = 'Predicted'), size = 1.5,alpha = 0.6) +
+  theme(legend.title = element_blank()) +
+  xlab('Year') +
+  ylab('Number of Fin Whales')
+```
+
+As an alternative hypothesis, we fit the model using nlminb with a staring guess of 0.05 for *r*. This resulted in a convergence around the following parameters (Table.2), with a negative log likelihood of `r round(whale.fit2$objective,2)`. 
+
+```{r other fit}
+
+other.fit <- data.frame(Coefficient = whale.fit2$par)
+
+rownames(other.fit) <- c('r','k','tau')
+
+kable(other.fit, digits = 2, caption = 'Summary of model parameters with a starting guess of 0.05 for r')
+
+```
+
+This produces a "worse" fit to the data, by essentially passing through the middle of our three data points, but seems a more reasonable growth rate for whales, and in addition is not producing a "good" fit through chaotic fluctuations (Fig.4).
+
+
+```{r, fig.cap= 'Fit of model using a starting guess of 0.05 for r'}
+ggplot(fitted.whale,aes(year,n)) +
+  geom_point(aes(fill = 'Observed'), size = 2) +
+  geom_line(aes(year,nhat,color = 'Predicted'), size = 1.5, alpha = 0.6) +
+  theme(legend.title = element_blank()) +
+  xlab('Year') +
+  ylab('Number of Fin Whales')
+```
+
+## C
+
+To estimate the likelihood profile of *MSYR*, we found the maximum likelihood estimate of *K* and $\tau$ across a range of fixed *r* values  ([1e-2 : 1.5]), and then converted *r* to MSYR through the proof in part A. We then plotted the minimized negative log likelihood at each value of *MSYR* (Fig.5)
+
+```{r msyr likelihood profile, fig.cap='Likelihood profile of MSYR. Box is a zoomed in look at the negative log likelihood for MSYR values between 0 and 0.2'}
+rs <- seq(1e-2,1.5,length.out = 400)
+
+msyr_likelihood_profile <- data.frame(rs,nll = NA)
+
+msyr_likelihood_profile$msyr <- 0.705 * rs
+
+last_r <- whale.fit2$par[1]
+
+last_k <- 5*log(whale.fit2$par[2])
+
+last_tau <- log(whale.fit2$par[3])
+
+for (r in 1:length(rs)) #construct likelihood profile
+{
+  
+  fit <- try(mle(fit.whale.model,start = list(k = (last_k), tau = (last_tau)),fixed = list(r = rs[r],z = 2.39,b0 = NA,dat =whale.dat), nobs = sum(is.na(whale.dat$n) == F)), silent = T)
+  
+  while (class(fit) == 'try-error')
+  {
+    tick <- 0
+    fit <- try(mle(fit.whale.model,start = list(k = jitter(last_k,100), tau = jitter(last_tau)),fixed = list(r = rs[r],z = 2.39,b0 = NA,dat =whale.dat), nobs = sum(is.na(whale.dat$n) == F)), silent = T)
+    tick <- tick + 1
+    if (tick >100)
+    {
+      error('stupid MLE will not converge')
+    }
+  }
+  
+  msyr_likelihood_profile$nll[r] <-  -(as.numeric(logLik(fit)))
+  
+  last_r <- as.numeric(coef(fit)['r'])
+  
+  last_k <- as.numeric(coef(fit)['k'])
+  
+  last_tau <- as.numeric(coef(fit)['tau'])
+}
+full_plot <- (ggplot(msyr_likelihood_profile,aes(msyr,nll)) + geom_point(shape = 21, alpha = 0.6, fill = 'lightseagreen') + ylab('Negative Log Likelihood') + xlab('MSY/Nmsy (MSYR)'))
+
+# + geom_smooth(method = 'loess',se = F,span = .1)
+
+zoomtheme <- theme(legend.position="none", axis.line=element_blank(),
+                   axis.title.x=element_blank(),axis.title.y=element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_rect(color='red', fill="white"),plot.margin = unit(c(0,0,-6,-6),"mm"))
+
+zoomed_plot <- full_plot + coord_cartesian(xlim = c(0,.2),ylim = c(0.75,1.05)) + zoomtheme
+
+g <- ggplotGrob(zoomed_plot)
+
+x_offs <- 0.5
+
+y_offs <- 8
+
+(full_plot + 
+  annotation_custom(grob = g, xmin = min(msyr_likelihood_profile$msyr)-.02, xmax = min(msyr_likelihood_profile$msyr) + x_offs, ymin = min(20,max(msyr_likelihood_profile$nll)) - y_offs, ymax = min(20,max(msyr_likelihood_profile$nll))) + 
+  geom_segment(aes(x = 0, xend = .025, y = 1, yend = 10.5),arrow = arrow())+
+  geom_segment(aes(x = 0.2, xend = 0+x_offs, y = 1, yend = 10.5),arrow = arrow()) + ylim(-2,20))
+
+```
+
+The likelihood profile illustrates the difficulty in using this model (fit to only three data points) to provide management advice for the North Atlantic fin whale. The lowest negative log likelihoods occur at *MSYR* values greater than 0.75, when the model begins to exhibit chaotic behavior. This chaos itself makes it difficult to find a true "best" estimate for these high values of *MSYR*, even if we believed that the fit at these levels of *r* is not a spurious result of the chaotic model behavior. Beyond that, we see that the likelihood profile has a number of local minima. Zooming in to a more reasonable range of *MSYR* values (0 to 0.2), we see that there is a local minimum at an *MSYR* of ~0.04, and another at an *MSYR* of ~0.1. In summary then, the data do not provide a clear picture of what a likely value of *MSYR* is. Or rather, the data provide a number of competing hypotheses of potential values of *MSYR*, largely associated with either a state of nature in which *r* is low, or *r* is very high. So, even if we believe that we have a good estimate of *N~MSY~*, we cannot be very certain about the level of *MSY* corresponding to that *N~MSY~*, and so cannot provide reliable estimates of a sustainable level of harvest given these data.   

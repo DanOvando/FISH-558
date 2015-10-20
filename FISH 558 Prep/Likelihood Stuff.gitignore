@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+**/*.pptx
+**/*.xlsx
+**/*.pdf
+**/*.docx
+*.docx
+*.Rproj
+*.csv

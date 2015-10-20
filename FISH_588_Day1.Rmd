@@ -1,0 +1,40 @@
+---
+title: "Fish 558 Workshop Day 1"
+author: "Dan Ovando"
+date: "September 24, 2015"
+output:
+  html_document:
+    fig_align: center
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 8
+  word_document: default
+---
+```{r global_options, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+
+library(gridExtra)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(knitr)
+```
+
+```{r set things up}
+
+lecture <- 'Workshop Day 2'
+
+basedir <- getwd()
+
+setwd(paste(getwd(),'/Fish 558 Workshop/',lecture, sep = ''))
+
+dat <- read.table("EX2R.dat", 
+           header=TRUE)
+
+list.files()
+
+ggplot(dat,aes(Age,Length)) + geom_point()
+
+```

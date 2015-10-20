@@ -1,0 +1,91 @@
+---
+title: "ThHake"
+author: "Dan Ovando"
+output:
+  pdf_document: default
+  html_document:
+    fig_align: center
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 8
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+
+library(gridExtra)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(knitr)
+```
+
+
+The Namibian hake example from *The Ecological Detective*. 
+
+```{r load in data}
+
+devtools::load_all('~/R Functions/mletools')
+
+hakedata <- read.csv('namibian_hake_data.csv', stringsAsFactors = F)
+
+kable(summary(hakedata), caption = 'Summary of Namibian hake data')
+
+hake_plot <- (ggplot(gather(hakedata,'Data','Value',2:3),aes(year,Value, fill = Data)) + geom_point(shape = 21) + facet_grid(Data~., scales = 'free_y') +scale_fill_discrete(guide = FALSE))
+
+hake_plot
+
+r_guess <- 0.1
+
+k_guess <- 10*max(hakedata$catch)
+
+q_guess <- .001
+
+sdev_guess <- sd(hakedata$cpue)
+
+schaefer_hake_fit <- nlminb(start = c(r_guess,k_guess,q_guess,sdev_guess), objective = schaefer_mle,dat = hakedata,
+       use = 'optimization', pars_to_opt = c('r','k','q','sdev'), lower = c(0.01,.01,1e-7,1e-7),
+       upper = c(1,Inf,1,Inf))
+
+# schaefer_hake_fit <- nlminb(start = schaefer_hake_fit$par, objective = schaefer_mle,dat = hakedata,
+#        use = 'optimization')
+
+schaefer_fit <- schaefer_mle(params =schaefer_hake_fit$par, dat = hakedata)$dat
+
+# schaefer_ed_fit <- schaefer_mle(params =c(.39,2709,.00045,.12), dat = hakedata)$model_summary
+
+```
+
+```{r, fig.cap= 'MLE fit of schaefer model with observation error'}
+sch_cpue_fit <- (ggplot(schaefer_fit,aes(year,cpue)) + 
+                   geom_point() + 
+                   geom_line(aes(year,predicted_cpue), color = 'red'))
+
+sch_cpue_fit
+
+```
+
+```{r plot fits}
+
+schaefer_summary <- data.frame(msy_est= mean(schaefer_fit$MSY),r_est = mean(schaefer_fit$r),k_est =mean(schaefer_fit$k), q_est = mean(schaefer_fit$q), sdev_est = mean(schaefer_fit$sdev))
+
+kable((schaefer_summary), caption = 'summary of MLE estimates of schaefer parameters with observation error')
+
+```
+
+Now, explore likelihood profile of the various things
+
+```{r}
+
+likelihood_plots <- schaefer_profile(r_range = seq(.2,.7,by = 0.05), k_range = seq(2000,4000, by = 100),msy_range = seq(200,400,by = 50), dat = hakedata)
+
+likelihood_plots
+
+# schaefer_hake_fit <- nlminb(start = c(r_guess,k_guess), objective = schaefer_mle,dat = hakedata,
+#        use = 'optimization', pars_to_opt = c('r','k'), lower = c(0.01,.01),
+#        upper = c(1,Inf), fixed_q = .0008,fixed_sdev = .08)
+
+```
+
+# Schaefer with Process Uncertainty

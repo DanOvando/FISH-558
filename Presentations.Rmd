@@ -1,0 +1,80 @@
+---
+title: "Untitled"
+author: "Dan Ovando"
+date: "September 26, 2015"
+output: ioslides_presentation
+---
+
+## R Markdown
+
+This is an R Markdown presentation. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document.
+
+## Slide with Bullets
+
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+## Slide with R Code and Output
+
+```{r global_options, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+
+library(gridExtra)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(knitr)
+```
+
+```{r}
+devtools::load_all('~/R Functions/mletools')
+
+devtools::load_all('~/R Functions/PopulationModels')
+
+hakedata <- read.csv('namibian_hake_data.csv', stringsAsFactors = F)
+
+kable(summary(hakedata), caption = 'Summary of Namibian hake data')
+
+hake_plot <- (ggplot(gather(hakedata,'Data','Value',2:3),aes(year,Value, fill = Data)) + geom_point(shape = 21) + facet_grid(Data~., scales = 'free_y') +scale_fill_discrete(guide = FALSE))
+
+r_guess <- 0.1
+
+k_guess <- 10*max(hakedata$catch)
+
+q_guess <- .001
+
+sdev_guess <- sd(hakedata$cpue)
+
+schaefer_hake_fit <- nlminb(start = c(r_guess,k_guess,q_guess,sdev_guess), objective = schaefer_mle,dat = hakedata,
+                            use = 'optimization', pars_to_opt = c('r','k','q','sdev'), lower = c(0.01,.01,1e-7,1e-7),
+                            upper = c(1,Inf,1,Inf))
+
+
+schaefer_fit <- schaefer_mle(params =schaefer_hake_fit$par, dat = hakedata)
+
+```
+
+## Summary of Data
+
+```{r, echo=T}
+
+a <- 3 + 4
+
+hake_plot
+```
+
+## Slide with Plot
+
+```{r, echo=FALSE}
+sch_cpue_fit <- (ggplot(schaefer_fit$dat,aes(year,cpue, shape = 'Observed')) + 
+                   geom_point() + 
+                   geom_line(aes(year,predicted_cpue,linetype = 'Predicted'), color = 'red') + theme(legend.title = element_blank()))
+
+sch_cpue_fit
+```
+

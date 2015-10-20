@@ -1,0 +1,103 @@
+---
+title: "FISH 558 Homework 3"
+author: "Dan Ovando"
+date: "October 18, 2015"
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+library(gridExtra)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(coda)
+library(ggmcmc)
+library(LaplacesDemon)
+# devtools::install('BowheadModel',dependencies = T)
+devtools::load_all('BowheadModel', reset = T)
+```
+
+
+```{r}
+
+catch.dat <- read.csv('Hwk3.csv',stringsAsFactors = F, header = F)
+colnames(catch.dat) <- c('year','catch')
+
+abund.dat <- read.csv('HWK3B.csv',stringsAsFactors = F, header = F)
+colnames(abund.dat) <- c('year','abundance', 'abundance.cv')
+
+dat <- full_join(catch.dat,abund.dat, by = 'year') %>%
+  subset(is.na(year) == F)
+
+whale.data.plot <- dat %>%
+  gather('metric','whale.numbers',2:3) %>%
+  ggplot(aes(year,whale.numbers, fill = metric)) + 
+  geom_point(shape = 21)
+
+a <- proc.time()
+
+# Make object with all the stuff for this particular whale population simulation
+whales <- make.whales(dat = dat,catch.dat = NA,f.max = .34,s.0 = .2,s.rest = .97, extra.time = 0,K = 10000)
+
+#Run the model using the created object
+whale.proj <- whale.pop.model(whales = whales, dat = dat, n.years = dim(dat)[1])
+
+# Calculate the negative log likelihood
+nll <- whale.likelihood(whale.proj)  
+
+# nlminb(start = c(.9,.9,2000,.3),whale.optim, dat = dat, catch.dat= catch.dat, lower = c(.8,.8,1000,.1), upper = c(1,1,3000,.4))
+
+proc.time() - a
+
+b <- whale.proj$pop %>% 
+  dplyr::select(-numbers) %>%
+  gather('age','numbers',age.0:age.13) %>%
+  subset(age != 'age.0') %>%
+  group_by(year) %>%
+  summarize(total.whales = sum(numbers), mature.whales = last(numbers)) %>%
+  ggplot(aes(year,total.whales)) + 
+  geom_point() + 
+#   ylim(0,NA) + 
+  geom_hline(aes(yintercept = (whales$life$K)))
+
+b
+
+#Check combinations that don't crash the population
+# functional.whales <- whale.sir(dat = dat, progbar = T)
+
+functional.whales <- whale.sir(Nout = 200, k.lower = 10000, dat = dat, catch.dat = catch.dat, progbar = T, mode = 'fit', Threshold = exp(-2.22))
+
+(functional.whales %>% 
+  gather('variable','value',s.0:f.max)) %>%
+  ggplot(aes(value, fill = variable)) +
+  scale_fill_discrete(guide = F) + 
+  geom_histogram() + 
+  facet_wrap(~variable, scales = 'free')
+  
+
+(summary(functional.whales))
+
+whale.fit <- make.whales(dat = dat, catch.dat = catch.dat, s.0 = median(functional.whales$s.0),
+                             s.rest = median(functional.whales$s.rest), f.max = median(functional.whales$f.max),
+                             K = 6000)
+
+fitted.whales <- whale.pop.model(whales = whale.fit, dat = dat, n.years = dim(dat)[1])
+
+ (fitted.whales$pop) %>%
+  select(-age.0, -numbers) %>%
+  gather('age','numbers',age.1:age.13) %>%
+  group_by(year) %>%
+  summarize(adult.whales = sum(numbers, na.rm = T)) %>%
+  left_join(dat, by = 'year') %>%
+  ggplot(aes(year,abundance)) + 
+  geom_point(shape = 21, aes(fill  = 'observed'), size  = 2) + 
+  geom_line(aes(year,adult.whales, color = 'predicted'), size = 2)
+  
+
+  ggplot(aes(year,numbers))
+
+```

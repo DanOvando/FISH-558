@@ -1,0 +1,229 @@
+---
+title: "Example Application 4 - MCMC"
+author: "Dan Ovando"
+date: "September 28, 2015"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, setup}
+rm(list = ls())
+do_mcmc <- T
+Nthin <- 50
+Nburn <- 50000
+Nsim <- 300000
+
+set.seed(123456)
+library(mvtnorm)
+library(stats4)
+library(MASS)
+library(coda)
+library(tcltk2)
+library(gridExtra,quietly = T)
+library(ggplot2, quietly = T)
+library(plyr, quietly = T)
+library(dplyr, quietly = T)
+library(tidyr, quietly = T)
+library(knitr, quietly = T)
+library(coda, quietly = T)
+library(ggmcmc)
+library(parallel)
+
+sapply(list.files(pattern="[.]R$", path="FISH 558 Functions", full.names=TRUE), source)
+
+
+OFile <- 'Fish 558 Workshop/Workshop Day 4/Ex4a.DAT'
+Nyear <- scan(OFile,skip=1,n=1,quiet=T)
+Effort <- scan(OFile,skip=5,n=Nyear,quiet=T)
+EggsObs <- scan(OFile,skip=7,n=Nyear,quiet=T)
+SDEgg <- scan(OFile,skip=9,n=1,quiet=T)
+adult.counts <- scan(OFile,skip=11,n=Nyear,quiet=T)
+log.sd.adults <- scan(OFile,skip=13,n=1,quiet=T)
+interaction.counts <- scan(OFile,skip=15,n=Nyear,quiet=T)
+log.sd.interaction <- scan(OFile,skip=17,n=1,quiet=T)
+n.years.agedat <- scan(OFile,skip=20,n=1,quiet=T)
+n.years.data <- scan(OFile,skip=22,n=n.years.agedat,quiet=T)
+age.data <- matrix(scan(OFile,skip=24,nlines = 3,quiet=T),nrow = 3, byrow = T)
+
+OFile <- 'Fish 558 Workshop/Workshop Day 4/Ex4b.DAT'
+param.guess <- scan(OFile,skip=2,n=14,quiet=T)
+param.guess <- data.frame( var = c('s0','lambda','q',paste('egg.numbers',1:11,sep = '')),guess = param.guess,stringsAsFactors = F)
+param.guess.sd <- scan(OFile,skip=4,n=14,quiet=T)
+param.guess.sd <- data.frame( var = c('s0','lambda','q',paste('egg.numbers',1:11,sep = '')),guess = param.guess.sd,stringsAsFactors = F)
+vcov <- matrix(scan(OFile,skip=6,nlines = 14,quiet=T),nrow = 14, byrow = T)
+
+stages <- c('eggs','yearlings','juv','adults')
+
+datnames <- c('year',stages,'effort','true.eggs','true.adults','true.interact')
+
+run_time <- Nyear
+
+files <- ls()
+
+files <- files[files !='Ofile']
+
+dat <- list()
+
+for (f in 1:length(files))
+{
+  eval(parse(text = paste('dat$',files[f],'=',files[f], sep = '')))
+}
+
+dat$blankpop <- as.data.frame(matrix(NA,nrow = run_time,ncol = length(datnames)))
+
+colnames(dat$blankpop) <- datnames
+
+dat$blankpop$s0 <- NA
+
+dat$blankpop$s.i <- 0.7
+
+dat$blankpop$s.j <- 0.8
+
+dat$blankpop$s.a <- 0.95
+
+dat$blankpop$gamma <- 0.2
+
+dat$blankpop$lambda <- NA
+
+dat$blankpop$q <- NA
+
+dat$blankpop$xt <- NA
+
+dat$blankpop[1,stages] <- c(100,10,5,1)
+
+dat$blankpop$year <- 1:run_time
+
+dat$blankpop$effort[1:length(dat$Effort)] <- dat$Effort
+
+dat$blankpop$true.eggs[1:(length(dat$EggsObs))] <- dat$EggsObs
+
+dat$blankpop$true.adults[1:(length(dat$adult.counts))] <- dat$adult.counts
+
+dat$blankpop$true.interact[1:(length(dat$interaction.counts))] <- dat$interaction.counts
+
+if (do_mcmc == T)
+{
+  MC <- DoMCMC(Xinit = dat$param.guess,DataUsed = dat,Ndim = dim(param.guess)[1], covar = dat$vcov,Nsim = Nsim,Nburn = Nburn,Nthin = Nthin,run_time = run_time)
+  
+  colnames(MC) <- c(param.guess$var,'nll')
+  
+  save(file = 'MCMC results.Rdata',MC)
+}
+if (do_mcmc == F)
+{
+  load(file = 'MCMC results.Rdata')
+  
+}
+
+
+
+MCMC_up<- mcmc(as.data.frame(MC),thin = Nthin)
+
+summary(MCMC_up)
+
+ggmcmc(ggs(MCMC_up), file="model_simple-diag.pdf")
+
+ggpair <- ggs_pairs(ggs(MCMC_up), lower = list(continuous = "density"))
+ggsave('ggpair plots.pdf',plot = ggpair)
+
+ggtrace <- ggs_traceplot(ggs(MCMC_up))
+ggsave('ggtrace plots.pdf',plot = ggtrace)
+
+# pdf(file = 'mcmc chain diagnostics.pdf')
+# plot(MCMC_up,trace = T)
+# dev.off()
+
+pdf(file = 'mcmc cross correlation diagnostics.pdf')
+crosscorr.plot(MCMC_up)
+dev.off()
+
+# pdf(file = 'mcmc autocorrelation diagnostics.pdf')
+# autocorr.plot(MCMC_up)
+# dev.off()
+
+# pdf(file = 'mcmc gweke plot diagnostics.pdf')
+# geweke.plot(MCMC_up)
+# dev.off()
+
+# pdf(file = 'mcmc trace diagnostics.pdf')
+# plot.mcmc(MCMC_up)
+# dev.off()
+
+## Project Forward
+## 
+
+run_time <- 13+20
+
+dat$blankpop <- as.data.frame(matrix(NA,nrow = run_time,ncol = length(datnames)))
+
+colnames(dat$blankpop) <- datnames
+
+dat$blankpop$s0 <- NA
+
+dat$blankpop$s.i <- 0.7
+
+dat$blankpop$s.j <- 0.8
+
+dat$blankpop$s.a <- 0.95
+
+dat$blankpop$gamma <- 0.2
+
+dat$blankpop$lambda <- NA
+
+dat$blankpop$q <- NA
+
+dat$blankpop$xt <- NA
+
+dat$blankpop[1,stages] <- c(100,10,5,1)
+
+dat$blankpop$year <- 1:run_time
+
+dat$blankpop$effort[1:length(dat$Effort)] <- dat$Effort
+
+dat$blankpop$true.eggs[1:(length(dat$EggsObs))] <- dat$EggsObs
+
+dat$blankpop$true.adults[1:(length(dat$adult.counts))] <- dat$adult.counts
+
+dat$blankpop$true.interact[1:(length(dat$interaction.counts))] <- dat$interaction.counts
+
+efforts <- c(1,5,10)
+
+MCE <- as.data.frame(MC)
+
+MCE$future.effort <- efforts[1]
+
+for (i in 2:length(efforts))
+{
+  
+  MCtemp  <- as.data.frame(MC)
+  
+  MCtemp$future.effort <- efforts[i]
+  
+  MCE <- rbind(MCE,MCtemp)
+}
+
+turtle_sims <- mclapply(1:dim(MCE)[1],sim_turtles,mc.params = MCE,dat = dat,run_time = run_time,mc.cores = 3) %>%
+  ldply()
+
+head(turtle_sims)
+
+turtle_future <- subset(turtle_sims,year == max(year)) %>%
+  mutate(lambda.bins = ntile(lambda,3)) %>%
+  group_by(lambda.bins) %>%
+  mutate(mean_lambda = mean(lambda)) %>%
+  ungroup() %>%
+  group_by(future.effort,lambda.bins) %>%
+  summarize(mean_adults = mean(adults, na.rm = T),lambda = mean(mean_lambda))
+
+turtle_future_plot <- (ggplot(turtle_future,aes(factor(future.effort),mean_adults, fill = factor(round(lambda,2)))) + geom_bar(stat = 'identity',position = 'dodge') + scale_fill_brewer(name = 'Lambda',palette = 'Spectral') + ylab('Mean Future Adults') + xlab('Future Effort'))
+
+turtle_future_plot
+
+
+
+
+```
+

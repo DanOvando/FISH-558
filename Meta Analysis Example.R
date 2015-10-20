@@ -1,0 +1,136 @@
+library(MASS)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+
+
+
+n <- 10000
+
+n.samp <- 150
+
+x <- 45
+
+alpha <- 12
+
+beta <- 36
+
+#part 1
+
+alpha.prime <- x + alpha
+
+beta.prime <- n.samp - x + beta
+
+draws <- 10000
+
+thetas <- rbeta(draws,shape1 = alpha, shape2 = beta)
+
+p.theta <- dbinom(x,n.samp,thetas) #dbinom (success,draws,probability)
+
+theta.samped <- sample(thetas,.1*draws,replace = T, prob = p.theta)
+
+newthetas <- seq(.1,.5,length.out = draws)
+p.true.beta <- dbeta(newthetas,shape1 = alpha.prime,shape2 = beta.prime)
+
+quartz()
+truehist(theta.samped)
+lines(newthetas,p.true.beta)
+
+# Part 2
+
+
+#State of nature is theta
+
+thetas <- rbeta(draws,shape1 = alpha.prime, shape2 = beta.prime)
+
+binseq <- seq(.2,1,by = .2)
+
+bins <- qbeta(binseq,shape1 = alpha.prime, shape2 = beta.prime)
+
+bins <- c(0, bins)
+
+dat <- data.frame(thetas,0)
+
+colnames(dat) <- c('theta','bin')
+
+binned.theta<- (cut(dat$theta,breaks = bins))
+
+dat$bin <- as.character(binned.theta)
+
+
+diseased.people <- function(theta,omega,pop){
+
+  diseased <- pop * theta
+
+  clean <- pop * (1 - theta)
+  cured <- (1 + exp(-0.2 * (omega - 10)))^-1 * diseased
+  diseased <- diseased - cured
+
+  clean <- clean + cured
+
+  performance <- clean - 100*omega
+
+  return(performance)
+
+}
+
+
+omega_dat <- list()
+
+omegas <- c(4,10,14,20)
+tempdat <- dat
+for (o in 1:length(omegas))
+{
+
+  tempdat$omega <- omegas[o]
+
+  tempdat$performance <- diseased.people(theta = dat$theta,pop = n,omega = omegas[o])
+
+  omega_dat[[o]] <- tempdat
+}
+omega_dat <- ldply(omega_dat)
+
+omega_dat$prob.theta <-
+
+
+decision_summary <- omega_dat %>%
+  group_by(bin,omega) %>%
+  summarize(expected_performance = mean(performance))
+
+
+ggplot(decision_summary,aes(bin,expected_performance, fill = factor(omega))) + geom_bar(position = 'dodge', stat = 'identity')
+
+decision_table <- omega_dat %>%
+  group_by(bin,omega) %>%
+  summarize(expected_performance = mean(performance)) %>%
+  spread(bin,expected_performance)
+
+kable(decision_table)
+
+# Part C
+#
+
+decision_summary %>%
+  ungroup() %>%
+  group_by(omega) %>%
+  summarise(exp.per = mean(expected_performance))
+
+poss <- expand.grid(omega = seq(0,30,length.out = 20),theta = seq(0,1,length.out = 20))
+
+performance <- diseased.people(theta = poss$theta,omega = poss$omega,pop = n)
+
+poss$performance <- performance
+
+poss$theta.prob <- dbeta(poss$theta,shape1 = alpha.prime, shape2 = beta.prime)
+
+poss2 <- poss %>%
+  group_by(omega) %>%
+  summarize(expected.perf = sum(performance * theta.prob)) %>%
+  ggplot(aes(omega,expected.perf)) + geom_point()
+
+persp(unique(poss$omega),unique(poss$theta),matrix(poss$performance,nrow = 20))
+
+plot(seq(0,30,by = 1),performance)
+

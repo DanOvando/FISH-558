@@ -1,0 +1,200 @@
+---
+title: "Likelihood Stuff"
+author: "Dan Ovando"
+date: "September 14, 2015"
+output: 
+html_document:
+fig_align: center
+fig_caption: yes
+fig_height: 6
+fig_width: 8
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+
+library(gridExtra)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(knitr)
+```
+
+# Ecological Detective Chapter 8
+
+First stab, redoing "Conservation Biology of Wildebeest in the Serengeti"
+
+```{r load wildebest data}
+
+yr_and_rain <- data.frame(year = 1960:1989,
+                          dry_season_rain = c(100,38,100,104,167,167,165,79,91,77,134,192,235,159,211,257,
+                                              204,300,187,84,99,163,97,228,208,83,44,112,191,202))
+
+pop_sizes <- data.frame(year = c(1961,1963,1965,1967,1971,1972,1977,1978,1982,1984,1986,1989),
+                        est_pop_size = c(263,357,439,483,693,773,1444,1249,1209,1338,1146,1686),
+                        sd_est_pop_size = c(NA,NA,NA,NA,28.8,76.7,200,355,272,138,133,176))
+
+adult_mort <- data.frame(year = c(1968,1969,1971,1972,1982,1983),
+                         adult_mort = c(.017,.014,.008,.005,.027,.021))
+
+calf_survival = data.frame(year = c(1964:1968,1970:1972),
+                           calf_survival = c(0.5,.25,.3,.26,.36,.32,.35,.36))
+
+wdbeast <- yr_and_rain %>%
+  join(pop_sizes,by = 'year') %>%
+  join(adult_mort,by = 'year') %>%
+  join(calf_survival, by = 'year')
+
+wdbeast$sd_est_pop_size[is.na(wdbeast$sd_est_pop_size)] <- (0.3 * wdbeast$est_pop_size)[is.na(wdbeast$sd_est_pop_size)]
+
+wdbeast$sd_calf_survival <- 0.3 * wdbeast$calf_survival
+
+wdbeast$sd_adult_mort <- 0.3 * wdbeast$adult_mort
+
+pop_trend <- ggplot(wdbeast,aes(year,est_pop_size)) + geom_point()
+
+```
+
+First thing first, let's look at some data
+```{r summarize data,fig.cap = 'Observed estimated wildebeast pop sizes'}
+pop_trend
+kable(summary(wdbeast),caption = 'Summary statistics of wildebeast data')
+```
+
+## Logistic Model
+
+```{r fit logistic model}
+
+
+
+
+
+devtools::load_all('~/R Functions/mletools')
+
+initial_pop <- first(wdbeast$est_pop_size[is.na(wdbeast$est_pop_size)==F])
+
+
+rguess <- 0.1
+
+kguess <- 50*initial_pop
+
+fit <- nlminb(start = c(rguess,kguess),objective = logistic_mle,n1 = initial_pop,index = 'est_pop_size',dat = subset(wdbeast, year <= 1978 & year >= 1961),use = 'optimization',constrain = T)
+
+fitted_wdbeast <- logistic_mle(params = fit$par,n1 = initial_pop,index = 'est_pop_size',dat = subset(wdbeast, year <= 1978 & year >= 1961),constrain = T)
+
+logistic_fit <-   (ggplot(fitted_wdbeast,aes(year,observed)) +
+                     geom_point() +
+                     geom_line(aes(year,predicted)) + 
+                     annotate('text',x = (1965),y = 3*initial_pop,
+                              label = paste('r =', round(fitted_wdbeast$r[1],2),': K = ',
+                                            round(fitted_wdbeast$k[2],2),sep = '' ),size = 4) + 
+                     ylab('Population Size'))
+
+#   quartz()
+#   plot(fitted_wdbeast$year,fitted_wdbeast$observed,col = 'red', pch = 19)
+#   lines(fitted_wdbeast$year,fitted_wdbeast$predicted)
+#   legend('topleft',legend = c('observed','predicted'),lty = 1)
+
+```
+
+```{r plot logistic model,fig.cap= ' Fit of Logistic Model. Points are data, line is fitted line'}
+
+logistic_fit
+```
+
+## Life History Model
+
+```{r life history fit}
+
+a_guess <- 0.3
+
+b_guess <- (150*1.25*10)
+
+f_guess <- 0.9
+
+g_guess <- (150*1.25*10)
+
+
+fit <- nlminb(start = c(a_guess,b_guess,f_guess,g_guess),objective = lifehistory_mle,n1 = initial_pop,index = 'est_pop_size',dat = subset(wdbeast, year <= 1978 & year >= 1961),use = 'optimization',constrain = F, lower = c(0,0.1,0,0.1), upper = c(1,Inf,1,Inf))
+
+
+life_fitted_wdbeast <- lifehistory_mle(params = fit$par,n1 = initial_pop,index = 'est_pop_size',dat = subset(wdbeast, year >= 1961))
+
+lifehistory_fit <-   (ggplot(life_fitted_wdbeast,aes(year,observed)) +
+                        geom_point() +
+                        geom_line(aes(year,n_predicted)) + 
+                        ylab('Population Size') + 
+                        xlim(c(1960,1990)))
+                        
+calf_fit <-   (ggplot(life_fitted_wdbeast,aes(year,calf_survival)) +
+                        geom_point() +
+                        geom_line(aes(year,predicted_calf_survival)) + 
+                        ylab('Population Size') + 
+                        xlim(c(1960,1990)) + ylim(c(0,.5)))
+
+adult_fit <-   (ggplot(life_fitted_wdbeast,aes(year,adult_mort)) +
+                        geom_point() +
+                        geom_line(aes(year,predicted_monthly_mortality)) + 
+                        ylab('Population Size') + 
+                        xlim(c(1960,1990)) + ylim(c(0,.5)))
+
+lifehistory_fit
+
+calf_food_survival <-   (ggplot(life_fitted_wdbeast,aes(food_per_animal,calf_survival)) +
+                           geom_point() +
+                           geom_line(aes(food_per_animal,predicted_calf_survival)) + 
+                           ylab('Calf Survival'))
+
+lifehistory_fit
+
+calf_food_survival
+
+```
+
+Exploring the distributin of N~eq~..
+
+```{r}
+
+finalpops <- seq(.25,10,by = .1)
+
+optstore <- as.data.frame(matrix(NA, nrow = length(finalpops), ncol = 8))
+
+colnames(optstore) <- c('iteration','n_target','n_eq','nll','a','b','g','f')
+
+pars <- list()
+pars$a_guess <- 0.3
+
+pars$b_guess <- (150*1.25*10)
+
+pars$f_guess <- 0.9
+
+pars$g_guess <- (150*1.25*10)
+
+for (f in 1:length(finalpops))
+{
+  
+  fit <- nlminb(start = c(pars$a_guess,pars$b_guess,pars$g_guess,pars$f_guess),objective = lifehistory_mle,n1 = initial_pop,Ntarget = finalpops[f],target_N = T, index = 'est_pop_size',dat = subset(wdbeast, year <= 1978 & year >= 1961),use = 'optimization',constrain = F, lower = c(0,0.1,0,0.1), upper = c(1,Inf,1,Inf))
+  
+  fitrun <- lifehistory_mle(params = fit$par,n1 = initial_pop,index = 'est_pop_size',dat = subset(wdbeast, year <= 1978 & year >= 1961),target_N = T, Ntarget = finalpops[f]) %>%
+    subset(year == max(year))
+  
+  optstore[f,] <- data.frame(f,initial_pop*finalpops[f],fitrun$n_eq,fit$objective,fitrun$a,fitrun$b,fitrun$g,fitrun$f)
+  
+#   pars$a_guess <- fitrun$a
+#   
+#   pars$b_guess <- fitrun$b
+#   
+#   pars$g_guess <- fitrun$g
+#   
+#   pars$f_guess <- fitrun$f
+  
+}
+
+ntarget_nll_plot <- (ggplot(optstore,aes(n_eq,nll)) + geom_point() 
+                     + xlab('Neq') + ylab('Negative Log Likelihood'))
+
+
+
+```
+

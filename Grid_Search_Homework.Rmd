@@ -1,0 +1,131 @@
+---
+title: "Grid Search Homework - FISH 558 Friday Harbor Workshop Fall 2015"
+author: "Dan Ovando"
+date: "September 27, 2015"
+output:
+  pdf_document:
+    fig_caption: yes
+  html_document:
+    fig_caption: yes
+  word_document:
+    fig_caption: yes
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+
+```
+
+```{r do grid search, fig.cap='Gray whal popuation over time'}
+
+#Homework Grid Search Methods
+#
+
+rm(list = ls())
+set.seed(100)
+library(gridExtra,quietly = T)
+library(ggplot2, quietly = T)
+library(plyr, quietly = T)
+library(dplyr, quietly = T)
+library(tidyr, quietly = T)
+library(knitr, quietly = T)
+
+
+dat <- read.table(file = 'Fish 558 Workshop/Workshop Day 3/GRAY.TXT',header = F,stringsAsFactors = F)
+
+colnames(dat) <- c('year','pop')
+
+kable(summary(dat), caption = 'summary of North Pacific gray whale data')
+
+ggplot(dat,aes(year,pop)) + geom_point(fill = 'steelblue2', shape = 21) + xlab('Year') + ylab('Gray Whale Population (Numbers)')
+
+sigma <- 0.1
+
+# Part 1
+
+
+```
+
+We use a model of $P_{t} = P_{1968}e^\alpha{t-1968}e^{\epsilon_{t}}$ to predict gray whale populations, where we assume that $\epsilon$ is distribution $N(0,.1)$. 
+
+We use a grid search routine to estimate the parameters $\alpha$ and *p1968*. Our grid for $\alpha$ spans [0,.05] and *p1968* spans [10000,15000] in intervals determined by a parameter *grid_search*
+
+## Grid Search Function
+```{r grid function ,echo=T}
+
+grid_search <- function(grid_space = 5,lower_pgrid = 10000,upper_pgrid = 15000,lower_alpha = 0,upper_alpha = 0.05,sigma = 0.1)
+{
+
+pgrid = seq(lower_pgrid,upper_pgrid,length.out = grid_space)
+
+alpha_grid <- seq(lower_alpha,upper_alpha,length.out = grid_space)
+
+years <- dat$year
+
+grid <- expand.grid(p1968 = pgrid,alpha = alpha_grid,year = years) # create matrix of factorial combinations of alpha and o1968
+
+grid$pophat <- with(grid,p1968 * exp(alpha * (year - 1968))) #predict whale population in each year
+
+grid <- join(grid,dat,by = 'year') #add in observed data
+
+grid$likelihood <- with(grid,exp(-(log(pophat) - log(pop) )^2 / (2*sigma^2) )) #calculate log likelihood
+grid <- grid %>%
+  group_by(alpha,p1968) %>%
+  summarize(total_like = prod(likelihood)) %>% #Get total likelihood across all years for each alpha and p1968
+  ungroup() %>%
+  mutate(prior = dnorm(alpha,mean = .04,sd = .01) * dnorm(p1968,mean = 12000,sd = 1000)) %>% #calculate prior
+  mutate(posterior = prior * total_like, norm_posterior = posterior/sum(posterior)) #calculate the normlized posterior
+
+# Marginal likelihood of alpha
+alpha_like <- grid %>%
+  group_by(alpha) %>%
+  summarize(marg_like = sum(norm_posterior))
+
+# Marginal likelihood of p1968
+p1968_like <- grid %>%
+  group_by(p1968) %>%
+  summarize(marg_like = sum(norm_posterior))
+
+return(list(grid = grid, alpha_like = alpha_like,p1968_like = p1968_like))
+}
+
+```
+
+Using a *grid_space* parameter of 10, we get the following estimates of the likelihoods 
+
+```{r space = 10, fig.cap= 'Marginal Posterior of Alpha with a grid of 100'}
+grid_space <- 10
+
+grid <- grid_search(grid_space = grid_space)
+
+(ggplot(grid$alpha_like,aes(alpha,marg_like)) + geom_point() + xlab('alpa') + ylab('Marginal Posterior Probability'))
+```
+
+```{r, fig.cap='Marginal posterior of p1968 with a grid of 10'}
+(ggplot(grid$p1968_like,aes(p1968,marg_like)) + geom_point() + xlab('p1968') + ylab('Marginal Posterior Probability'))
+```
+
+```{r, fig.cap='Joint likelihood of alpha and p1968 with a grid of 10'}
+persp(x = unique(grid$grid$alpha), y = unique(grid$grid$p1968), z = matrix(grid$grid$norm_posterior,nrow = grid_space, ncol = grid_space), xlab = 'alpha', ylab = 'p1968',zlab = 'likelihood')
+```
+
+
+Using a *grid_space* parameter of 100, we get the following estimates of the likelihoods
+
+
+```{r space = 100, fig.cap= 'Marginal Posterior of Alpha with a grid of 100'}
+grid_space <- 100
+
+grid <- grid_search(grid_space = grid_space)
+
+(ggplot(grid$alpha_like,aes(alpha,marg_like)) + geom_point() + xlab('alpa') + ylab('Marginal Posterior Probability'))
+```
+
+```{r, fig.cap='Marginal posterior of p1968 with a grid of 100'}
+(ggplot(grid$p1968_like,aes(p1968,marg_like)) + geom_point() + xlab('p1968') + ylab('Marginal Posterior Probability'))
+```
+
+```{r, fig.cap='Joint likelihood of alpha and p1968 with a grid of 100'}
+persp(x = unique(grid$grid$alpha), y = unique(grid$grid$p1968), z = matrix(grid$grid$norm_posterior,nrow = grid_space, ncol = grid_space), xlab = 'alpha', ylab = 'p1968',zlab = 'Joint Posterior Probability',scale = T)
+```
+
