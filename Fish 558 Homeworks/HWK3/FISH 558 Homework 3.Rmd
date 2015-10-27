@@ -1,9 +1,16 @@
 ---
-title: "FISH 558 Homework 3"
+title: "FISH 558 Homework 3 - Bowhead Whale Assessment and Decision Analysis"
 author: "Dan Ovando"
 date: "October 18, 2015"
-output: html_document
+output:
+  pdf_document:
+    fig_caption: yes
+    fig_height: 3
+    fig_width: 6
+  html_document: default
+  word_document: default
 ---
+
 
 ```{r global_options, include=FALSE}
 library(knitr)
@@ -17,87 +24,397 @@ library(broom)
 library(coda)
 library(ggmcmc)
 library(LaplacesDemon)
+library(foreach)
+library(scales)
+library(stargazer)
+# library(BowheadModel)
 # devtools::install('BowheadModel',dependencies = T)
-devtools::load_all('BowheadModel', reset = T)
+ devtools::load_all('BowheadModel')
+#  
 ```
 
 
 ```{r}
+set.seed(12345)
+runname <- 'Version 1.0'
 
-catch.dat <- read.csv('Hwk3.csv',stringsAsFactors = F, header = F)
-colnames(catch.dat) <- c('year','catch')
+runSIR <- F
 
-abund.dat <- read.csv('HWK3B.csv',stringsAsFactors = F, header = F)
-colnames(abund.dat) <- c('year','abundance', 'abundance.cv')
+runfolder <- paste('Results',runname, sep = '/')
 
-dat <- full_join(catch.dat,abund.dat, by = 'year') %>%
-  subset(is.na(year) == F)
-
-whale.data.plot <- dat %>%
-  gather('metric','whale.numbers',2:3) %>%
-  ggplot(aes(year,whale.numbers, fill = metric)) + 
-  geom_point(shape = 21)
-
-a <- proc.time()
-
-# Make object with all the stuff for this particular whale population simulation
-whales <- make.whales(dat = dat,catch.dat = NA,f.max = .34,s.0 = .2,s.rest = .97, extra.time = 0,K = 10000)
-
-#Run the model using the created object
-whale.proj <- whale.pop.model(whales = whales, dat = dat, n.years = dim(dat)[1])
-
-# Calculate the negative log likelihood
-nll <- whale.likelihood(whale.proj)  
-
-# nlminb(start = c(.9,.9,2000,.3),whale.optim, dat = dat, catch.dat= catch.dat, lower = c(.8,.8,1000,.1), upper = c(1,1,3000,.4))
-
-proc.time() - a
-
-b <- whale.proj$pop %>% 
-  dplyr::select(-numbers) %>%
-  gather('age','numbers',age.0:age.13) %>%
-  subset(age != 'age.0') %>%
-  group_by(year) %>%
-  summarize(total.whales = sum(numbers), mature.whales = last(numbers)) %>%
-  ggplot(aes(year,total.whales)) + 
-  geom_point() + 
-#   ylim(0,NA) + 
-  geom_hline(aes(yintercept = (whales$life$K)))
-
-b
-
-#Check combinations that don't crash the population
-# functional.whales <- whale.sir(dat = dat, progbar = T)
-
-functional.whales <- whale.sir(Nout = 200, k.lower = 10000, dat = dat, catch.dat = catch.dat, progbar = T, mode = 'fit', Threshold = exp(-2.22))
-
-(functional.whales %>% 
-  gather('variable','value',s.0:f.max)) %>%
-  ggplot(aes(value, fill = variable)) +
-  scale_fill_discrete(guide = F) + 
-  geom_histogram() + 
-  facet_wrap(~variable, scales = 'free')
+if (dir.exists(runfolder) == F | runSIR == T)
+{
   
-
-(summary(functional.whales))
-
-whale.fit <- make.whales(dat = dat, catch.dat = catch.dat, s.0 = median(functional.whales$s.0),
-                             s.rest = median(functional.whales$s.rest), f.max = median(functional.whales$f.max),
-                             K = 6000)
-
-fitted.whales <- whale.pop.model(whales = whale.fit, dat = dat, n.years = dim(dat)[1])
-
- (fitted.whales$pop) %>%
-  select(-age.0, -numbers) %>%
-  gather('age','numbers',age.1:age.13) %>%
-  group_by(year) %>%
-  summarize(adult.whales = sum(numbers, na.rm = T)) %>%
-  left_join(dat, by = 'year') %>%
-  ggplot(aes(year,abundance)) + 
-  geom_point(shape = 21, aes(fill  = 'observed'), size  = 2) + 
-  geom_line(aes(year,adult.whales, color = 'predicted'), size = 2)
+  dir.create(runfolder, recursive = T)
   
+  catch.dat <- read.csv('Hwk3.csv',stringsAsFactors = F, header = F)
+  colnames(catch.dat) <- c('year','catch')
+  
+  abund.dat <- read.csv('HWK3B.csv',stringsAsFactors = F, header = F)
+  colnames(abund.dat) <- c('year','abundance', 'abundance.cv')
+  
+  dat <- full_join(catch.dat,abund.dat, by = 'year') %>%
+    subset(is.na(year) == F)
+  
+  whale.data.plot <- dat %>%
+    gather('metric','whale.numbers',2:3) %>%
+    ggplot(aes(year,whale.numbers, fill = metric)) + 
+    geom_point(shape = 21)
+  
+  a <- proc.time()
+  
+  # Make object with all the stuff for this particular whale population simulation
+  whales <- make.whales(dat = dat,catch.dat = catch.dat,f.max = .34,s.0 = .2,s.rest = .97, extra.time = NA,K = 10000, use.catch = F)
+  
+  #Run the model using the created object
+  whale.proj <- whale.pop.model(whales = whales, dat = dat, n.years = dim(dat)[1])
+  
+  # Calculate the negative log likelihood
+  nll <- whale.likelihood(whale.proj)  
+  
+  # nlminb(start = c(.9,.9,2000,.3),whale.optim, dat = dat, catch.dat= catch.dat, lower = c(.8,.8,1000,.1), upper = c(1,1,3000,.4))
+  
+  proc.time() - a
+  
+  b <- whale.proj$pop %>% 
+    dplyr::select(-numbers) %>%
+    gather('age','numbers',age.0:age.13) %>%
+    subset(age != 'age.0') %>%
+    group_by(year) %>%
+    summarize(total.whales = sum(numbers), mature.whales = last(numbers)) %>%
+    ggplot(aes(year,total.whales)) + 
+    geom_point() + 
+    #   ylim(0,NA) + 
+    geom_hline(aes(yintercept = (whales$life$K)))
+  
+  
+  #Check combinations that don't crash the population
+  # functional.whales <- whale.sir(dat = dat, progbar = T)
+  
+  binary.whales <- whale.sir(Nout = 1000, k.lower = 10000, dat = dat, catch.dat = catch.dat, progbar = T, mode = 'simple', MLE = log(0.99), use.catch = T)
+  
+  
+  functional.whales <- whale.sir(Nout = 200, k.lower = 10000, dat = dat, catch.dat = catch.dat, progbar = T, mode = 'fit', MLE = 4)
+  
+  future.catches <- c(67, 134, 201)
+  
+  future.whales <- foreach(f = 1:length(future.catches), .combine = rbind) %do%
+  {
+    simmed.whales <- sim.whales(dat = dat, catch.dat = catch.dat, possible.whales = functional.whales, extra.time = 21, extra.catch = future.catches[f])
+  }
+  
+  processed.binary.whales <- process.whale.SIR(fitted.whales = binary.whales, dat = dat, catch.dat = catch.dat, rungroup = 'Binary Whales', runfolder = runfolder, use.catch = T)
+  
+  
+  processed.functional.whales <- process.whale.SIR(fitted.whales = functional.whales, dat = dat, catch.dat = catch.dat, rungroup = 'Fitted Whales', runfolder = runfolder)
+  
+  check.catches <- future.whales %>%
+    group_by(year, catchlevel) %>%
+    summarize(total.catch = mean(catch, na.rm = T))
+  
+  catch.plot <- check.catches %>%
+    ggplot(aes(year, total.catch, fill = factor(catchlevel))) + 
+    geom_point(shape = 21)
+  
+  
+  summarized.future.whales <- future.whales %>%
+    group_by(year,catchlevel) %>%
+    summarize(lower.5 = quantile(predicted.whales,probs = 0.05, na.rm = T),
+              upper.95 =quantile(predicted.whales,probs = 0.95, na.rm = T),
+              median.whales = median(predicted.whales)) %>%
+    left_join(dplyr::select(dat, year,abundance), by = 'year')
+  
+  summarized.future.whales$catchlevel[summarized.future.whales$year <= 2002] <- 'Historic'
 
-  ggplot(aes(year,numbers))
+  future.whale.summary.plot <- summarized.future.whales %>%
+    subset(year > 1975) %>%
+    ggplot(aes(x = year)) +
+    geom_ribbon(aes(ymin = lower.5, ymax = upper.95, color = factor(catchlevel),fill = factor(catchlevel)), alpha = 0.25) +
+    geom_line(aes(year, median.whales, color = factor(catchlevel)), size = 1.5, linetype = 'longdash') +
+    geom_point(aes(year, abundance), shape = 19, color = 'black') + 
+        scale_fill_manual(name = 'Catch Scenario', values =  c('lightgoldenrod','orangered','green4','steelblue2')) +
+            scale_color_manual(name = 'Catch Scenario', values =  c('lightgoldenrod','orangered','green4','steelblue2')) +
+    xlab('Year') +
+    ylab('Numbers of Whales') + 
+    geom_vline(aes(xintercept = 2003), linetype = 'longdash')  + 
+    theme_bw()
+  
+  ggsave(paste(runfolder,'Whale Projections.pdf',sep = '/'), plot = future.whale.summary.plot, height = 6, width = 8 )
+  
+  
+  whale.groups <- future.whales %>%
+    subset(year == 2003) %>%
+    mutate(state.of.nature = cut(predicted.whales, breaks = c(0,7000,8000,20000), labels = c('<7000','7000-8000','>8000')))
+    
+ probs.of.nature <- whale.groups %>%
+    group_by(state.of.nature) %>%
+    summarize(n.occured = length(iteration)) %>%
+    ungroup() %>%
+    mutate(prob.occuring = n.occured / sum(n.occured))
+ 
+ 
+  decision.table <- future.whales %>%
+    left_join(dplyr::select(whale.groups,iteration,state.of.nature), by = 'iteration') %>%
+    group_by(state.of.nature, catchlevel) %>%
+    mutate(nvk =predicted.whales/K ) %>%
+    summarize(prob.increased.whales = mean( (predicted.mature.whales[year == 2023] / predicted.mature.whales[year == 2003])>1), 
+              prob.nvk = mean((nvk)[year == max(year)] > 0.5 & nvk[2023]>nvk[2003])) %>%
+    left_join(probs.of.nature, by = 'state.of.nature') %>%
+    ungroup() %>%
+    mutate(expected.increase = prob.increased.whales * prob.occuring,
+           expected.nvk = prob.nvk * prob.occuring) %>%
+    group_by(catchlevel) %>%
+    mutate(expected.outcome = sum(expected.increase),
+           expected.nvk.outcome = sum(expected.nvk)) %>%
+    arrange(desc(expected.outcome))
+
+    save.image(file=paste(runfolder,'bowhead whale decision analysis.rdata',sep='/'))
+
+  write.csv(file=paste(runfolder,'bowhead whale decision table.csv',sep='/'), decision.table)
+    
+} else{
+  
+  load(paste(runfolder,'bowhead whale decision analysis.Rdata', sep = '/'))
+}
+  
+```
+
+The goal of this assignment is to fit a Bayesian assessment to the Bering-Chukchi-Beaufort Seas stock of bowhead whales (*Balaena mysticeus*) using catch data and estimates of abundance. Using this assessment, we then provide management advice as to the risks posed by alternative options for future catches of bowhead whales. 
+
+## Data
+
+Catch data are available from `r min(dat$year)` to `r max(dat$year)`, with abundance indices available for some years from `r min(abund.dat$year)` to `r max(abund.dat$year)` (Fig.1)
+
+
+
+```{r data summary, fig.cap= 'Summary of bowhead whale data'}
+   print(whale.data.plot)
+```
+
+## Model
+We use an age-structured population model to fit the population, assuming that the age at sexual maturity (*x*) is13. *z* is set to 2.39.  
+
+1) $N_{y+1,a} = N_{y,x} (f_{0} * (f_{max} - f_{0})[1 - \frac{N^{1+}}{K^{1+}}^{z}])$ if $a=0$
+
+2) $N_{y+1,a} = N_{y,0}s_{0}$ if $a=1$
+
+3) $N_{y+1,a} = (N_{y,a-1} - C_{y,a-1})s_{a}$ if $2 \leq a \geq x$
+
+4) $N_{y+1,a} = (N_{y,x-1} - C_{y,x-1})s_{a} + (N_{y,x} - C_{y,x})s_{a}$
+
+Where catch is the number of whales caught in a given year in each age class, calculated as 
+
+5) $C_{y,a} = 0$ if $a = 0$
+
+and
+
+6) $C_{y,a} = C_{y}\frac{N_{y,a}}{N_{y,1:x}}$ if $a > 0$
+
+Our goal for the assessment portion is to estimate the fecundity in the limit of population size *f~max~*, the survival rates of calves (*s~0~*) and adults (*s~a~*), and the carrying capacity of adult whales (*K*, for all whales $a{\geq}1$). 
+
+This leaves us with the parameter *f~0~*, which can be estimated analytically given *s~0~* and *s~a~*. 
+
+If we assume the population to be at equilibrium, the number of calves produced each year (Eq.1) simplifies to $N_{y,x}(f_{0})$. At the same time, we know that $N_{y+1,x} =  N_{y,x}$. In order for this to be true, the number of mature adult deaths has to equal the number of new mature adults. Mature deaths are $N_{y,x}(1-s_{a})$, and the number of new adults at equilibrium is equal to the number of calves at equilibrium that survive to be mature:  $N_{y,x}(f_{0})*(s_{0}s_{a}^{x-1})$. We can then set deaths equal to mature adult recruits: 
+
+$$N_{y,x}(1-s_{a}) = N_{y,x}(f_{0})*(s_{0}s_{a}^{x-1})$$
+
+and rearrange to solve for *f~0~*, resulting in 
+
+$$ f_{0} = \frac{(1-s_{a})}{(s_{0}s_{a}^{x-1})}$$
+
+
+Given values of *K*, *s~0~* and *s~a~*, we can solve for the equilibrium population structure as
+
+$$K = N_{a=0} {\sum} (s_{0}s_a^0,s_{0}s_a^{1},...\frac{s_{0}s_a^{x-1}} {(1-s_{a})})$$
+
+$$N_{a=0} = \frac{K}{{\sum} (s_{0}s_a^0,s_{0}s_a^{1},...\frac{s_{0}s_a^{x-1}} {(1-s_{a})})}$$
+
+and the stable age structure is then simply
+
+$$ N_{a=0}(s_{0}s_a^0,s_{0}s_a^{1},...\frac{s_{0}s_a^{x-1}} {(1-s_{a})})$$
+
+We can now move on to the assessment itself. 
+
+## Assignment
+
+### Part A
+
+Fit assessment model. For all runs, we assume uniform priors on *s~0~*, *s~a~*, *f~max~*, and *K*, from the range provided in the assignment sheet.
+
+#### A.1
+
+For A.1, we are simply interested in exploring plausible combinations of our parameters given the observe catch history, i.e. those parameter combinations that do not result in the population being driven to extinction through the catch history. 
+
+To do this we fit our population model to the observed catches using a sample importance re-sample (SIR) algorithm, where the likelihood for a given set of model parameters is 1 if the population is greater than or equal to 1 across all years, and 0 if the population in any year drops below 1. 
+
+Our threshold of 0.99 was effective at preventing re-sampling of parameter vectors
+
+```{r fig 2 binary whales, fig.cap= 'SIR diagnostic. Number of unique parameter vectors making up percentages of draws from the posterior'}
+
+processed.binary.whales$check.SIR.plot
 
 ```
+
+The catch data alone does provide some information on plausible parameter values (Fig.3). While the SIR provides little information on *s~0~* and *f~max~*, the catch data alone suggest higher values of  *K* (mode near ~18000) and *s~a~* (mode near 0.975). 
+
+```{r fig 3 binary whales, fig.cap= 'Posterior distributions of parameters resulting from post-model pre-data SIR'}
+
+processed.binary.whales$posterior.distributions.plot
+
+```
+
+
+The distributions of predicted population sizes (in terms of 1+ year old whales) using the posterior of the post-model pre-data SIR are shown in Fig.4 and Fig.5 . 
+
+```{r fig 4 binary whale fits,fig.cap='Posterior distributions of predicted adult whale population from the post-model pre-data SIR'}
+processed.binary.whales$posterior.predicted.whales.plot
+```
+
+```{r fig 5 binary whale fits,fig.cap='Median and range of 90% (grey area) of adult whale population from draws from the posteriors of parameters using post-model pre-data SIR'}
+processed.binary.whales$whale.summary.plot
+```
+
+####A.2
+
+For the next part, we incorporate the abundance indices into our model. The negative log likelihood function is now calculated per 
+
+$$NLL = \sum_{o}^{O} \frac{ (log(N_{o,a = 1:x}^{Predicted} ) -  log(N_{o,a = 1:x}^{Observed}))^{2}}{2{\sigma}^{2}}$$
+
+Where *o* is a particular observation. 
+
+We use a threshold of 2.22 for the SIR algorithm, the minimum of the NLL provided by the assignment (though higher thresholds of 3.0 still achieve acceptable levels of repeated parameter vectors and runs faster), and take 200 draws from the posterior generated by the SIR algorithm. 
+
+Our SIR algorithm succeeded in preventing excessive repeated sampling of the same parameter vector (Fig.6)
+
+```{r fig 6 functional whales, fig.cap= 'SIR diagnostic. Number of unique parameter vectors making up percentages of draws from the posterior of the post-data model'}
+
+processed.functional.whales$check.SIR.plot
+
+```
+
+
+The abundance data do provide information on several of our estimated parameters (Fig.7)
+
+```{r fig 7 post data whales, fig.cap= 'Posterior distributions of the estimated parameters using the post-data SIR'}
+processed.functional.whales$posterior.distributions.plot
+```
+
+
+*K* and *s~a~* are the most well defined by the model,both of which shifted down substantially compared to the pre-data estimates (Fig.8). The data also provide some evidence of lower values of *s~0~* than suggested by the pre-data model, though little information is available in the data concerning *f~max~*. 
+
+
+```{r fig 8 comparison, fig.cap='Comparison of posterior distributions from pre and post data SIRs'}
+
+predat <- processed.binary.whales$posterior.distributions
+
+predat$model <- 'Pre-Data'
+
+postdat <- processed.functional.whales$posterior.distributions
+
+postdat$model <- 'Post-Data'
+
+pre.post.dat <- rbind(predat,postdat)
+
+  posterior.distributions.plot  <- pre.post.dat %>%
+    ggplot(aes(value, fill = model)) +
+    scale_fill_brewer(name = 'SIR Model', palette = 'Spectral') +
+#     geom_histogram(aes(y = ..density..) ,alpha = 0.6) +
+    geom_density(alpha = 0.6) +
+    facet_wrap(~variable, scales = 'free') +
+    theme_bw() + 
+    xlab('Value')+
+  ylab('Density') + 
+    theme(axis.text.x = element_text(size = 8))
+  
+posterior.distributions.plot
+```
+
+The post-data fitted population trajectories are shown in Fig.9-10 . 
+
+We see that the data allows us a much better fit to the observed population abundances (we should certainly hope so), especially for the more recent and higher abundance estimates. We can also see though that the model struggles to capture the apparent rate of increased abundance seen in the data. This is likely due to the long period of low catches leading up to the abundance data: It is difficult for the model to produce a population low enough after a long period of low catches to explain the sudden increase in populations suggested by the data. 
+
+```{r fig 9 post data whale fits,fig.cap='Posterior densities of parameters using post-data SIR'}
+processed.functional.whales$posterior.predicted.whales.plot
+```
+
+```{r fig 10 post data whale fits,fig.cap='Median and 90% range (5% to 95% range of posterior draws) of adult whale population from draws from the posteriors of parameters using post-data SIR'}
+processed.functional.whales$whale.summary.plot
+```
+
+### Part B
+
+For Part B, our task is to provide a decision table based around three states of nature and three proposed levels of future bowhead whale catches (decision table is at the end of the document due to annoying HTML issues I can't figure out). To accomplish this, we projected each of the 200 draws from the posterior generated by the post-data SIR forward to 2023. We divided these 200 draws into three states of nature: <7000 adult whales, 7000 $\leq$ adult whales $\geq$ 8000, and >8000 adult whales. Within each of those states of nature, we then calculated the probability under each proposed catch level that the number of sexually mature whales in 2023 was greater than the numbers in 2003 (Table.1). 
+
+```{r decision table}
+
+dt2 <- decision.table %>%
+  select(catchlevel,prob.increased.whales,expected.outcome,state.of.nature) %>%
+  rename('State of Nature' = state.of.nature, 'Future Catch' = catchlevel,
+         'P(N2023 > N2003)' = prob.increased.whales, 'Expected Value' = expected.outcome)
+```
+
+
+Our results suggest that catches of 134 and 201 whales have relatively low probabilities (.69 and .16 respectively) of achieving the desired outcome of increased numbers of mature whales in 2023, compared to 2003 (averaged across the three potential states of nature evaluated here). However, depending on the level of risk aversion of the managers, catches of 134 may be acceptable, especially if they believe strongly that the current state of nature is >8000 adult whales, which the data do suggest is the most likely state of nature. Future catches of 67 present a 99% probability, at least according to the model, of achieving the desired conservation outcome. 
+
+However, the chosen metric presents a number of potential problems that should be addressed. A healthy population of mature whales is obviously needed to ensure the long-term populations of bowhead whales. Looking at the density dependence function used in the model though (Eq.1), we see that calf production is a function both of mature whales and the ratio of total adult whales to the carrying capacity of adult whales. The current conservation metric used in the decision table does not account for either the number of adults, or the relative state of the adult population relative to carrying capacity. 
+
+If our goal is rebuilding the population to historic (i.e. unfished) levels, we might instead consider the total number of adults relative to the carrying capacity of adults (or the population as a percent of unfished population size), both since we might care about total population size intrinsically, and since total adults affects calf production. Under the current metric, even if we achieve an increase in the number of mature whales per our current metric, the total population itself may still be well below historic levels (Fig.11). 
+
+```{r fig 11 nvk, fig.cap= 'Distribution of N/K in 2023 from the posterior of the post-data SIR under three future catch scenarios'}
+
+NvK.plot <- future.whales %>%
+  subset(year == max(year)) %>%
+  ggplot(aes(predicted.whales/K, fill = factor(catchlevel))) + 
+#   geom_histogram(alpha = 0.6) + 
+    geom_density(alpha = 0.6) + 
+  scale_fill_manual(name = 'Future Catches',values = c('green','yellow','red')) + 
+  theme_bw() + 
+  xlab('% of Unexploited Population') + 
+  ylab('Density') + 
+  scale_x_continuous(labels = percent) + 
+  geom_vline(aes(xintercept = .50))
+
+print(NvK.plot)
+
+dt2 <- decision.table %>%
+  select(catchlevel,prob.nvk,expected.nvk.outcome,state.of.nature) %>%
+  rename('State of Nature' = state.of.nature, 'Future Catch' = catchlevel,
+         'P(N2023/K > 0.5)' = prob.nvk, 'Expected Value' = expected.nvk.outcome)
+```
+
+
+Retooling our decision table, we see that considering the probability that *N/K* in 2023 is greater than 0.5 and greater than *N/K* in 2003 (a rather arbitrary metric for illustration purposes) tells a different story than our current decision table metric. 
+In fact it this metric decreases the probability of success under the lowest catch scenarios, and increases the probability of success under the other two higher catch scenarios. 
+
+While the exact numbers are a function of the arbitrary metric selected here, the concept of measuring values and trends in *N/K* may provide a better indication of the degree to which a particular catch policy achieves the conservation goal of rebuilding bowhead whale populations. However, especially over shorter time periods, it would be beneficial to track mature adults as well to observe any transient dynamics, or to account for natural fluctuations in mature whale populations that might occur under a model incorporating stochasticity.  
+
+* * * * *
+Table 1: Decision table of future catches: **Catch** column refers to the number of
+bowhead whales allowed to be caught each year in the future. *N* refers to the number of adult whales in 
+2003. Probabilities are the probability that the number of mature whales in 2023 is greater than
+the number in 2003. The expected outcome is the mean probability of an increase in mature whales
+across all the three states of nature tested
+
+
+| **Catch** | *N<7000* | *7000 $\leq$ N $\geq$ 8000* | *N>8000* | *Expected Outcome*|
+| ------- |  ------ | ---------------------- | ---- | ------------- |
+|   67      |     1    |     0.96                 |    1   |     0.99        |
+|   134     |     0    |     0.21                 | 0.92   | 0.69            |
+|   201     |   0      |     0                    | 0.24   | 0.16            |  
+
+* * * * *
+
+```{r}
+
+kable((dt2), digits = 2, caption = 'Quick decision table based on
+      probability of N/K in 2023 being greater than 0.5 and greater than N/K in 2003')
+
+
+# stargazer((dt2), digits = 2, caption = 'Quick decision table based on
+#       probability of N/K in 2023 being greater than 0.5 and greater than N/K in 2003')
+
+```
+
+
+
+

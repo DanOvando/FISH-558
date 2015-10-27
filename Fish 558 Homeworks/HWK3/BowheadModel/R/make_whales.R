@@ -17,12 +17,14 @@
 #' year of data to add
 #' @export
 
-make.whales <- function(dat,catch.dat,default.catch = 0,s.0 = 0.4, s.rest = 0.8, f.max =3, z = 2.39, K = 10000, max.age = 13, extra.time = 0)
+make.whales <- function(dat,catch.dat,default.catch = 0,s.0 = 0.4, s.rest = 0.8, f.max =3,
+                        z = 2.39, K = 10000, max.age = 13, extra.time = NA, extra.catch = NA, use.catch = T)
 {
 
   #   K <- Kinit * exp((0:(max.age - 2))* log(s.rest))
   #
   #   K <- c(K,  (last(K) * exp(log(s.rest))) / (1-exp(log(s.rest))))   # Determine numbers at age
+
   init.calfs <- K / sum(c(s.0 * s.rest^(0:11), (s.0*s.rest^12) / (1 - s.rest)))
 
   init.adults <- init.calfs * c(s.0 * s.rest^(0:11), (s.0*s.rest^12) / (1 - s.rest))
@@ -39,9 +41,10 @@ make.whales <- function(dat,catch.dat,default.catch = 0,s.0 = 0.4, s.rest = 0.8,
 
   whales$dat$abundance.sd <- whales$dat$abundance * whales$dat$abundance.cv
 
-  if (extra.time >0) #tack on extra years if needed
+  if (is.na(extra.time) == F) #tack on extra years if needed
   {
-    time <- c(dat$year, last(dat$year) + 1:extra.time)
+    extra_time <- last(dat$year) + 1:extra.time
+    time <- c(dat$year, extra_time)
   } else{
     time <- dat$year
   }
@@ -54,13 +57,19 @@ make.whales <- function(dat,catch.dat,default.catch = 0,s.0 = 0.4, s.rest = 0.8,
   age.classes[1,2:dim(age.classes)[2]] <- init.adults
 
   age.classes[1,1] <-  init.calfs  # add in starting conditions calves
-
   catch.at.age <- as.data.frame(matrix(default.catch, nrow = length(time), ncol = max.age + 1)) #catch at age can be set to custom value
 
   colnames(catch.at.age) <- paste('catch', 0:max.age, sep = '.')
 
-  if (class(catch.dat) != 'logical') #add in observed catch data if needed
+  if (class(catch.dat) != 'logical' & use.catch == T) #add in observed catch data if needed
   {
+
+    if (is.na(extra.catch) == F)
+    {
+      extra_catch <- data.frame(year = extra_time, catch = extra.catch)
+
+      catch.dat <- rbind(catch.dat, extra_catch)# add in extra catch as needed
+    }
     catch.at.age$year <- time
 
     catch.at.age<- left_join(catch.at.age,catch.dat, by = 'year')
@@ -80,9 +89,9 @@ make.whales <- function(dat,catch.dat,default.catch = 0,s.0 = 0.4, s.rest = 0.8,
 
   whales$plus.adults <- which(colnames(whales$pop) == paste('age',max.age, sep = '.'))
 
-  whales$pop <- left_join(whales$pop,dat[,c('year','catch')], by = 'year')
+  whales$pop <- left_join(whales$pop,catch.dat[,c('year','catch')], by = 'year')
 
-  whales$pop[, paste('catch', 1:max.age, sep = '.')] <- whales$pop$catch / length(1:max.age)
+#   whales$pop[, paste('catch', 1:max.age, sep = '.')] <- whales$pop$catch / length(1:max.age)
 
   whales$catch.loc <- paste('catch',1:(whales$life$max.age-2), sep = '.')
 
@@ -97,6 +106,8 @@ make.whales <- function(dat,catch.dat,default.catch = 0,s.0 = 0.4, s.rest = 0.8,
   whales$age.matrix <- as.matrix(age.classes)
 
   whales$catch.matrix <- as.matrix(catch.at.age)
+
+  whales$catch.dat <- catch.dat
 
   # Idea for gathering on multiple groups of data
   #   whales$pop %>%

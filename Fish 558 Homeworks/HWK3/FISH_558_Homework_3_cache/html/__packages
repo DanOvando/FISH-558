@@ -1,0 +1,14 @@
+base
+knitr
+gridExtra
+ggplot2
+plyr
+dplyr
+tidyr
+broom
+coda
+GGally
+ggmcmc
+LaplacesDemon
+BowheadModel
+foreach

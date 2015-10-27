@@ -21,8 +21,12 @@ whale.pop.model <- function(whales,dat,n.years)
 
   max.age <- dim(pop)[2]
 
+  total.catches <- rowSums(whales$catch.matrix[,2:dim(whales$catch.matrix)[2]])
+
   for (t in 2:n.years)
   {
+
+    whales$catch.matrix[t-1,2:dim(whales$catch.matrix)[2]] <- total.catches[t-1] * pop[t-1,2:dim(pop)[2]] / sum(pop[t-1,2:dim(pop)[2]])
 
     pop[t,2] <- pop[t-1,1] * whales$life$s.0 #calf survival
 
@@ -44,6 +48,7 @@ whale.pop.model <- function(whales,dat,n.years)
 
   whales$pop$numbers <- rowSums(  pop[,grepl('age.',colnames(pop))])
 
+  whales$pop$adults <- rowSums(pop[, grepl('age.',colnames(pop)) & grepl('age.0',colnames(pop)) ==F ])
 
   return(whales)
 }

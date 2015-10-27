@@ -5,7 +5,8 @@
 \title{Process whale data}
 \usage{
 make.whales(dat, catch.dat, default.catch = 0, s.0 = 0.4, s.rest = 0.8,
-  f.max = 3, z = 2.39, Kinit = 10000, max.age = 13, extra.time = 0)
+  f.max = 3, z = 2.39, K = 10000, max.age = 13, extra.time = NA,
+  extra.catch = NA, use.catch = T)
 }
 \arguments{
 \item{dat}{the raw data}
@@ -21,8 +22,6 @@ no catch data exists}
 
 \item{z}{compensation ratio}
 
-\item{Kinit}{population in age 1, used to scale carrying capacity}
-
 \item{max.age}{plus group age}
 
 \item{extra.time}{number indicating how many years beyond the last
@@ -31,6 +30,8 @@ year of data to add}
 \item{catch}{the catch data if any. can be NA to not add any catch}
 
 \item{f.0}{fecundity at unfished EQ}
+
+\item{Kinit}{population in age 1, used to scale carrying capacity}
 }
 \description{
 \code{make.whales} returns a last object containing all
