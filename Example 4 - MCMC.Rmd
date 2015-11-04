@@ -119,7 +119,6 @@ if (do_mcmc == F)
 }
 
 
-
 MCMC_up<- mcmc(as.data.frame(MC),thin = Nthin)
 
 summary(MCMC_up)

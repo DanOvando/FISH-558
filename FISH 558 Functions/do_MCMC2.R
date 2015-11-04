@@ -1,7 +1,6 @@
 DoMCMC<-function(Xinit,DataUsed,Ndim,covar,Nsim=1000,Nburn=0,Nthin=1,prog_bar = T,run_time)
 {
 
-  show('new')
   Xcurr <- Xinit
   Fcurr <- -1*NegLogLike2(Xcurr = Xcurr,dat = DataUsed,run_time = run_time)
   Outs <- matrix(0,nrow=(Nsim-Nburn),ncol=(Ndim+1))

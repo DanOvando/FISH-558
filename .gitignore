@@ -2,6 +2,7 @@
 .Rhistory
 .RData
 **/*.pptx
+**/*.DS_Store
 **/*.xlsx
 **/*.pdf
 **/*.docx

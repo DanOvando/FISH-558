@@ -1,0 +1,138 @@
+---
+title: "FISH 558 Homework 4"
+author: "Dan Ovando"
+date: "October 31, 2015"
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+rm(list = ls())
+set.seed(54321)
+library(knitr)
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+library(gridExtra)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(coda)
+library(ggmcmc)
+# library(LaplacesDemon)
+library(foreach)
+library(scales)
+library(stargazer)
+library(mvtnorm)
+library(doMC)
+library(proftools)
+source('mosquito_likelihood.R')
+source('mozzy_mcmc.R')
+source('multi_mozzy_mcmc.R')
+source('thin_mcmc.R')
+
+
+# library(BowheadModel)
+# devtools::install('BowheadModel',dependencies = T)
+#  devtools::load_all('BowheadModel')
+#  
+```
+
+General outline. 
+
+You have a bunch of sites on a bunch of streams. 
+
+You need to estimate the expected count at the mouth of the river, the expected count at each site along the distance gradient for each stream, the standard deviation of the expeced counts, the rate of decay *alpha*, and the hyperpriors on alpha. 
+
+  1. Set up crap
+  2. For each MCMC run
+      1. Draw 45 parameters from a multivariate normal with mean of the current guess, vcov defined by andre
+      2. Pass those parameters to the likelihood function
+      3. Accept/reject based on that thershold trick
+      4. on you go, not that bad
+
+## Data
+
+```{r load data}
+
+dat <- read.csv(file = 'hwk4_data.csv',stringsAsFactors = F) %>%
+  dplyr::rename(stream = Steam) %>%
+  gather('distance','count', grep('X',colnames(.))) %>%
+  mutate(distance = as.numeric(gsub('X','',distance)))
+
+colnames(dat) <- tolower(colnames(dat))
+
+par_guess <- (read.csv(file = 'hwk4_pars.csv', stringsAsFactors = F))
+
+colnames(par_guess) <- tolower(colnames(par_guess))
+
+
+vcov <- read.csv(file = 'hwk4_vcov.csv', stringsAsFactors = F)
+
+rownames(vcov) <- colnames(vcov)
+
+
+dat_plot <- dat %>%
+  ggplot(aes(distance, count, fill = stream, size = count)) + 
+  geom_point(shape = 21) + 
+  facet_wrap(~stream)
+
+vcov.plot <- vcov %>%
+  mutate(var1 = colnames(.)) %>%
+  gather('var2','covar',which(grepl('var1',colnames(.)) == F)) %>%
+  ggplot(aes(var1,var2,fill = covar)) +
+  geom_tile()
+
+```
+
+# The likelihoods
+
+The likelihood has a few different thingies
+
+1. The data are poisson, so for each stream *i* at distance *j* predict the count $\mu$ using the count at the rivermouth $\mu_{i}e^{\alpha_{i}d_{j}}$ where $\alpha$ is the rate of count change with distance down the river. So, predict the count using the formula, then find the likelihood as dpois(count,$\mu_{i,j}$): the likelihood of the observed count given the mean expected count $\mu_{i,j}$. 
+
+2. Working our way through the rest of the likelihoods then...
+3. $\mu_{i}$ is distributed normal, defined by $\mu_{f}$, the expected count at the northernmost river and $\mu_{L}$ the expected count at the southernmost river, and $\sigma_{\mu}$. The priors on $\mu_{f}$ and $\mu_{L}$ are uniform so don't come into this. The prior on $\sigma_{\mu}$ is normal per dnorm(x,1,.1)
+4. $\alpha_{i}$ is distributed normal per dnorm($\overline{\alpha}$,$\sigma_{\alpha}$). $\overline{\alpha}$ has a uniform prior so doesn't come into this.  $\sigma_{\alpha}$ is distributed dnorm(x,.01,.1)
+
+So, the net likelihood will be 
+
+likelihood of the counts + the likelihood of the stream specific means + the likelihood of the rate of change parameter + the likelihood of the standard deviations for $\alpha$ and $\mu$. 
+
+
+$$\sum_{i} \sum_{j} dpois(count_{i,j},\mu_{i,j}, log = T) + \sum_{i} dnorm(x,thing_{i}, \sigma_{\mu}, log = T) + \sum_{i} dnorm(y,\overline{\alpha},\sigma_{\alpha}, log = T) + dnorm(z,1,.1, log = T) + dnorm(w,.01,.1, log = T)$$
+
+
+```{r mcmc run, cache=T}
+
+# par_guess[1,] <- jitter(as.numeric(par_guess))
+
+# a <- proc.time()
+
+# Rprof()
+# 
+
+sims <- 1e6
+  
+mcmc_results <- mozzy_mcmc(par_init = as.matrix(par_guess), parnames = colnames(par_guess), dat = dat, vcov = vcov, prog_bar = T, n_sim = sims, n_burn = round(.5*sims,0), n_thin = 1,vcov_augment = .3,jumpyness = .001)
+
+#   Rprof(NULL)
+#    RProfData<- readProfileData('Rprof.out')
+#    flatProfile(RProfData,byTotal=TRUE)
+
+# mcmc_results <- multi_mozzy_mcmc(par_guess = par_guess,num_starts = 2,numcores = 3, varnames = colnames(par_guess), dat = dat, vcov = vcov, prog_bar = F, n_sim = 1000, n_burn = 0, n_thin = 1,vcov_augment = 10)
+
+# proc.time() - a
+# unique(mcmc_results)
+# 
+
+mcmc_posteriors <- thin_mcmc(chains = mcmc_results$posteriors, thin_every = 50)
+
+ggmcmc(ggs(mcmc(mcmc_posteriors)), file="mozzy_mcmc_diagnostics.pdf")
+
+save(file = 'mozzy_mcmc.Rdata',mcmc_results)
+# ggtrace <- ggs_traceplot(ggs(mcmc(mcmc_results)))
+# 
+# crosscorr.plot((mcmc(mcmc_results)))
+
+```
+
