@@ -345,7 +345,7 @@ chain_post_hist <- chain_posts %>%
 ```
 
 
-For the Gelman-Rubin test, we calculate the deviance for each cycle of the chain as $-2*LL$, where *LL* is the log-likelihood of the observed vs. predicted ($\mu_{i,j}$) counts. We then calculate *W* as the mean of the variance of the deviance in each chain, and *B* as the variance of the mean of the deviance in each chain, and calculate the *R* statistic through the approximation $\frac{B + W}{W}$. Our resulting value is *R* =  `r round(unique(gelman_rubin$R),4)`, suggesting that our chains have in fact converged. 
+For the Gelman-Rubin test, we calculate the deviance for each cycle of the chain as $-2*LL$, where *LL* is the log-likelihood of the observed vs. predicted ($\mu_{i,j}$) counts. We then calculate *W* as the mean of the variance of the deviance in each chain, and *B* as the variance of the mean of the deviance in each chain, and calculate the *R* statistic through the approximation $\frac{B + W}{W}$. Our resulting value is *R* =  `r round(unique(gelman_rubin$R),2)`, suggesting that our chains have in fact converged. 
 
 ### Decision Guidance
 

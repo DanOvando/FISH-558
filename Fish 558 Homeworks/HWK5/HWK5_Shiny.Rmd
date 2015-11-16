@@ -1,0 +1,44 @@
+---
+title: "FISH-558-Shiny-Homework-5"
+author: "Dan Ovando"
+date: "November 13, 2015"
+output: html_document
+runtime: shiny
+---
+
+
+The goal of this assignment is to provide and MSE/decision analysis around the management of a mythical endangered species. There is uncertainty around parameters and a variety of potential management actions that need considering. 
+
+```{r load parameters}
+
+# n_at_age <- matrix(NA,nrow = sim_years, ncol = ages)
+
+```
+
+## Task A
+
+Find the relationship between the mean and CB of a beta distribtuion and the shape1 and shape 2 parameters for rbeta. The goal here is to take the mean and CV parameters for the beta distribution provided by Andre and convert them into R usable form. 
+
+The beta distribution is a continuous probability distribution defined on the interval [0,1], that can take a wide array of shapes 
+
+```{r, echo=FALSE}
+inputPanel(
+  selectInput("n_breaks", label = "Number of bins:",
+              choices = c(10, 20, 35, 50), selected = 20),
+  
+  sliderInput("bw_adjust", label = "Bandwidth adjustment:",
+              min = 0.2, max = 2, value = 1, step = 0.2)
+)
+
+renderPlot({
+  hist(faithful$eruptions, probability = TRUE, breaks = as.numeric(input$n_breaks),
+       xlab = "Duration (minutes)", main = "Geyser eruption duration")
+  
+  dens <- density(faithful$eruptions, adjust = input$bw_adjust)
+  lines(dens, col = "blue")
+})
+```
+
+
+
+

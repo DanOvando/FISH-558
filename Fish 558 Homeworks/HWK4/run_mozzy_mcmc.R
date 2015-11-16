@@ -1,18 +1,19 @@
-# Wrapper script to run in terminal ----
-rm(list = ls())
+# Wrapper script to run in Terminal
 
-run <- '3.3'
+#Initials ----
 
 sims <- 1.5e6
+
+run <- '3.31'
 
 run_folder <- paste('Results/',run,'/',sep = '')
 
 if (dir.exists(run_folder) == F){dir.create(run_folder, recursive = T)}
 
+set.seed(54321)
 
-# set.seed(54321)
 library(knitr)
-# knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
 library(gridExtra)
 library(ggplot2)
 library(plyr)
@@ -32,6 +33,8 @@ source('mozzy_likelihood.R')
 source('mozzy_mcmc.R')
 source('multi_mozzy_mcmc.R')
 source('thin_mcmc.R')
+
+# Data ----
 
 dat <- read.csv(file = 'hwk4_data.csv',stringsAsFactors = F) %>%
   dplyr::rename(stream = Steam) %>%
@@ -61,12 +64,31 @@ vcov.plot <- vcov %>%
   ggplot(aes(var1,var2,fill = covar)) +
   geom_tile()
 
-multichain_mcmc_results <- multi_mozzy_mcmc(par_guess = as.matrix(par_guess),jitfactor = 5,
-                                            num_starts = 3,numcores = 3, parnames = colnames(par_guess),
-                                            dat = dat, vcov = vcov, prog_bar = F, n_sim = sims,
-                                            n_burn = round(.6*sims,0), n_thin = 1,
-                                            vcov_augment = (2.4/sqrt(45))^2,jumpyness = .001)
+# MCMC ----
 
-print('finished parallel chains')
 
-save(file = paste(run_folder,'multi_chain_mcmc.Rdata',sep = ''), multichain_mcmc_results)
+#
+# optim(.3,tune_scalar,n_sim = n_sim,par_init = as.matrix(par_guess),parnames = colnames(par_guess),dat = dat,vcov = vcov, n_burn=round(.5*n_sim,0)
+#       ,n_thin=1,prog_bar = F,jumpyness = 1, seed = NA,targ_accept_rate = 0.3, lower = .05, upper = 1.5)
+#
+# tune_scalar(.3,n_sim = 1000,par_init = as.matrix(par_guess),parnames = colnames(par_guess),dat = dat,vcov = vcov, n_burn=round(.5*n_sim,0)
+# ,n_thin=1,prog_bar = F,jumpyness = 1, seed = NA,targ_accept_rate = 0.3)
+
+# a <- proc.time()
+
+mcmc_results <- mozzy_mcmc(par_init = as.matrix(par_guess),
+                           parnames = colnames(par_guess), dat = dat,
+                           vcov = vcov, prog_bar = T, n_sim = sims, n_burn = round(.6*sims,0),
+                           n_thin = 1,vcov_augment = (2.4/sqrt(45))^2,jumpyness = 1,targ_accept_rate = .2)
+
+# proc.time() - a
+
+
+mcmc_posteriors <- thin_mcmc(chains = mcmc_results$posteriors, thin_every = sims/1000)
+
+ggmcmc(ggs(mcmc(mcmc_posteriors)), file=paste(run_folder,"mozzy_mcmc_diagnostics.pdf", sep = ''))
+
+
+save(file = paste(run_folder,'mozzy_mcmc.Rdata', sep = ''), mcmc_results)
+
+
