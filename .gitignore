@@ -1,3 +1,4 @@
+**/*.Rdata
 .Rproj.user
 .Rhistory
 **/*.pptx

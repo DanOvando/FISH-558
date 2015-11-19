@@ -1,4 +1,10 @@
 base
+methods
+datasets
+utils
+grDevices
+graphics
+stats
 shiny
 knitr
 gridExtra
@@ -13,5 +19,6 @@ stargazer
 mvtnorm
 proftools
 iterators
+parallel
 doMC
 DT

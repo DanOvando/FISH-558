@@ -1,9 +1,13 @@
 ---
 title: "FISH 558 Homework 5"
 author: "Dan Ovando"
-date: "November 13, 2015"
-output: html_document
+date: "November 17, 2015"
+output:
+  html_document:
+    fig_caption: yes
 runtime: shiny
+resource_files:
+- Results/1.2/problembeast simulations.Rdata
 ---
 
 ```{r global_options, include=FALSE}
@@ -11,11 +15,17 @@ runtime: shiny
 
 set.seed(54321)
 
-run <- '1.1'
+run <- '1.2'
+
+num_cores <- 1
 
 run_folder <- paste('Results/',run,'/',sep = '')
 
-run_sims <- T
+run_sims <- F
+
+run_on_server <- F
+
+if (run_on_server == T){run_sims <- T}
 
 if (dir.exists(run_folder) == F){dir.create(run_folder, recursive = T)}
 
@@ -88,7 +98,7 @@ moments_to_shape <- function(mu,cv)
 #'
 sim_problembeast <- function(pb,sim_years = 101,hunted_patch = 0,s_j = .75,
                              recruit_value = 1, juv_value = 5, adult_value = 30,
-                             results, recruits,juveniles,adults,mature,plus)
+                             results, recruits,juveniles,adults,mature,plus, animals)
 {
   
   pb$s_j <- s_j #input juvenile survival
@@ -117,6 +127,8 @@ sim_problembeast <- function(pb,sim_years = 101,hunted_patch = 0,s_j = .75,
   n_adults <- sum(pb$n_at_age[1, mature])
   
   results$adults[1] <- n_adults
+  
+  results$animals[1] <- sum(pb$n_at_age[1, animals])
   
   pb$n_at_age <- as.matrix(pb$n_at_age)
   
@@ -197,6 +209,9 @@ sim_problembeast <- function(pb,sim_years = 101,hunted_patch = 0,s_j = .75,
       results$hunt_value[y+1] <- recruits_hunted * recruit_value
     }
     
+    results$animals[y+1] <- sum(pb$n_at_age[y + 1,animals])
+    
+    results$plus_group[y+1] <- pb$n_at_age[y + 1,plus]
   } #close year loop
   
   results <- results[1:sim_years,]
@@ -208,7 +223,7 @@ sim_problembeast <- function(pb,sim_years = 101,hunted_patch = 0,s_j = .75,
 ```
 
 
-The goal of this assignment is to provide and MSE/decision analysis around the management of a mythical endangered species. There is uncertainty around parameters and a variety of potential management actions that need considering. 
+The goal of this assignment is to provide a decision anaysis for the management of an endangered species, the greater problembeast. There is uncertainty around life history parameters, specifically juvenile survival rates, and a four potential hunting strategies on the table. 
 
 ```{r define problembeast parameters}
 
@@ -253,7 +268,7 @@ problembeast$phi_3_cv <- 0.1
 problembeast$phi_3_shape <- moments_to_shape(mu = problembeast$phi_3_mean,cv = problembeast$phi_3_cv)
 
 
-resultnames <- c('year','adults','hunted','hunt_value','hunted_patch','s_j')
+resultnames <- c('year','adults','animals','hunted','hunt_value','hunted_patch','s_j','plus_group')
 
 resultmat <- as.data.frame(matrix(0,nrow = sim_years+1,ncol = length(resultnames)))
 
@@ -261,6 +276,8 @@ colnames(resultmat) <- resultnames
 
 recruits <- which(colnames(problembeast$n_at_age) %in% 'age.0')
 
+animals <- (grep('age.',colnames(problembeast$n_at_age)))
+  
 juveniles <- which(colnames(problembeast$n_at_age) %in% paste('age',1:8,sep = '.'))
 
 adults <- which(colnames(problembeast$n_at_age) %in% paste('age',9:14,sep = '.'))
@@ -277,13 +294,13 @@ plus <- which(colnames(problembeast$n_at_age) == 'age.15')
 
 ## Task A
 
-Find the relationship between the mean and CB of a beta distribution and the shape 1 and shape 2 parameters for rbeta. The goal here is to take the mean and CV parameters for the beta distribution provided by Andre and convert them into R usable form. 
+The goal here is to take provided values for the mean and CV of the beta distribution and convert them into the shape parameters *a* and *b* used by the R function `rbeta`.
 
 The beta distribution is defined by
 
 1) $$ \frac{\Gamma(a+b)}{\Gamma(a)\Gamma(b)} x^{a-1}(1-x)^{b-1}$$
 
-where *a* and *b* are > 0 and the "shape1" and "shape2" parameters. The mean of the beta distribution is given as 
+where *a* and *b* are > 0 and the "shape1" and "shape2" parameters for `rbeta`. The mean of the beta distribution is given as 
 
 2) $$ \mu = \frac{a}{a+b} $$ 
 
@@ -313,9 +330,9 @@ which we can rearrange to solve for *a* as
 
 we can then calculate *b* through Eq.5
 
-## Part B
+## Task B
 
-Coding up equations 1:8, we obtain the following function
+Coding up the results of equations 1:8, we obtain the following function
 
 ```{r, echo=T}
 moments_to_shape <- function(mu,cv)
@@ -334,7 +351,7 @@ moments_to_shape <- function(mu,cv)
 
 ```
 
-which can be examined through Fig.1
+which can be examined below: 
 
 ```{r converted beta example, echo=FALSE}
 inputPanel(
@@ -353,22 +370,25 @@ renderPlot({
   
   name <- paste('a = ',round(shapes$shape1,2),', b = ',round(shapes$shape2,2),sep = '')
   
-  plot(plotseq,dbeta(plotseq,shape1 = shapes$shape1,shape2 = shapes$shape2),xlab = '',ylab = 'pdf', type = 'l',lwd = 2)
+  plot(plotseq,dbeta(plotseq,shape1 = shapes$shape1,shape2 = shapes$shape2),xlab = '',ylab = 'Density', type = 'l',lwd = 2)
   title(main = name)
   
 })
 ```
 
-## Part C
+## Task C
 
-```{r run sims, cache = F}
+We can observe the dynamics of the population as a function of the hunted patch (where 0 corresponds to no hunting) and the juvenile survival rate below. 
+
+```{r run sims, cache = T}
 
 sims <- expand.grid(s_j = c(0.75,0.8,0.82),hunted_patch = c(0,1,2,3),sim = 1:n_sims)
 
 run_sim <- function(j,sims,problembeast,resultmat,recruits,juveniles,adults,plus,mature)
 {
   out <- sim_problembeast(pb = problembeast,
-                          hunted_patch = sims$hunted_patch[j],s_j = sims$s_j[j], results = resultmat,juveniles = juveniles,adults = adults, mature = mature, plus = plus,recruits = recruits)
+                          hunted_patch = sims$hunted_patch[j],s_j = sims$s_j[j], results = resultmat,juveniles = juveniles,adults = adults, mature = mature, plus = plus,recruits = recruits,
+                          animals = animals)
   
   out$sim <- j
   
@@ -377,28 +397,42 @@ run_sim <- function(j,sims,problembeast,resultmat,recruits,juveniles,adults,plus
 }
 
 if (run_sims == T){
-  registerDoMC(cores=4)
+  registerDoMC(cores = num_cores)
   
   
   results <- (foreach(i = 1:dim(sims)[1]) %dopar%
                 (run_sim(i,sims = sims,problembeast = problembeast, resultmat = resultmat,juveniles = juveniles,
                          adults = adults, mature = mature, plus = plus, recruits = recruits)))
   
-#   save(file = paste(run_folder,'problembeast simulations.Rdata',sep = ''), results)
+  if (run_on_server == F)
+  {
+    save(file = paste(run_folder,'problembeast simulations.Rdata',sep = ''), results)
+  }
 }else{
-#   load(file = paste(run_folder,'problembeast simulations.Rdata',sep = ''))
+  if (run_on_server == F)
+  {
+    load(file = paste(run_folder,'problembeast simulations.Rdata',sep = ''))
+  }
 }
 
-tidy_results <- ldply(results)
+tidy_results <- ldply(results) %>%
+  group_by(sim) %>%
+  mutate(cumu_hunt_value = cumsum(hunt_value)) %>%
+  ungroup()
+
+
 
 decision_table <- tidy_results %>%
+  group_by(sim) %>%
+  mutate(cumu_hunt_value = cumsum(hunt_value)) %>%
+  ungroup() %>%
   subset(year == 101) %>%
   group_by(s_j,hunted_patch) %>%
-  summarize(mean_adults = mean(adults),p_lessthan_1000 = mean(adults < 1000), mean_value = mean(hunt_value)) %>%
+  summarize(mean_adults = mean(adults),p_lessthan_1000 = mean(adults < 1000), mean_value = mean(cumu_hunt_value), mean_animals = mean(animals)) %>%
   ungroup() %>%
   group_by(hunted_patch) %>%
   mutate(expected_adults = mean(mean_adults), expected_p_lt_1000 = mean(p_lessthan_1000),
-         expected_value = mean(mean_value)) %>%
+         expected_value = mean(mean_value), expected_animals = mean(mean_animals)) %>%
   ungroup() %>%
   mutate(state_of_nature = paste('juv survival = ',s_j, sep = ''))
 
@@ -412,6 +446,12 @@ decision_table2 <- select(decision_table, state_of_nature,hunted_patch,p_lesstha
   spread(state_of_nature,p_lessthan_1000) %>%
   mutate('Expected p(A < 1000)' = expected_p_lt_1000) %>%
   select(-expected_p_lt_1000) %>%
+  rename('Hunted Patch' = hunted_patch)
+
+decision_table3 <- select(decision_table, state_of_nature,hunted_patch,mean_animals,expected_animals) %>%
+  spread(state_of_nature,mean_animals) %>%
+  mutate('Expected Animals' = expected_animals) %>%
+  select(-expected_animals) %>%
   rename('Hunted Patch' = hunted_patch)
 
 decision_table_value <- select(decision_table, state_of_nature,hunted_patch,mean_value,expected_value) %>%
@@ -445,18 +485,24 @@ tradeoff3 <- (ggplot(subset(decision_table, hunted_patch >0),aes(1-expected_p_lt
 tidy_results$hunted_patch_name <- paste('Hunted Patch = ',tidy_results$hunted_patch, sep = '')
 
 outcome_plot <- subset(tidy_results, year == 101) %>%
-  ggplot(aes(adults, fill = factor(s_j))) +
-  geom_density(alpha = 0.75) + 
-  facet_wrap(~hunted_patch_name, scales = 'free_y') + 
+  ggplot(aes(factor(hunted_patch),adults, fill = factor(s_j))) +
+  geom_boxplot(alpha = 0.75) + 
+  xlab('Hunted Patch') + 
+  ylab('Number of Adults') + 
+  scale_fill_brewer(name = 'Juv. Survival',palette = 'Spectral') + 
   theme_light() + 
-  scale_fill_brewer(name = 'Juvenile Survival',palette = 'Spectral') + 
-  xlab('Number of Adults') + 
-  ylab('Density')
+  theme(legend.position = 'top') + 
+  geom_hline(aes(yintercept = 1000), linetype = 'dashed')
 
-
-# tradeoff
-
-# tradeoff2
+outcome_plot_value <- subset(tidy_results, year == 101) %>%
+  subset(hunted_patch >0) %>%
+  ggplot(aes(factor(hunted_patch),cumu_hunt_value, fill = factor(s_j))) +
+  geom_boxplot(alpha = 0.75) + 
+  xlab('Hunted Patch') + 
+  ylab('Cumulative Hunting Value') + 
+  scale_fill_brewer(name = 'Juv. Survival',palette = 'Spectral') + 
+  theme_light() + 
+  theme(legend.position = 'top')
 
 ```
 
@@ -472,7 +518,7 @@ inputPanel(
 renderPlot({
   
   simmed <- sim_problembeast(pb = problembeast,
-                             hunted_patch = as.numeric(input$hunted_patch),s_j = input$s_j, results = resultmat,juveniles = juveniles,adults = adults, mature = mature, plus = plus,recruits = recruits)
+                             hunted_patch = as.numeric(input$hunted_patch),s_j = input$s_j, results = resultmat,juveniles = juveniles,adults = adults, mature = mature, plus = plus,recruits = recruits, animals = animals)
   
   simplot <- ggplot(simmed, aes(year, adults, fill = hunt_value)) + 
     geom_point(shape = 21) + 
@@ -487,14 +533,24 @@ renderPlot({
 })
 ```
 
+For Task C we ran 1000 simulations of factorial combinations of juvenile survival states of nature and hunting strategies (including no hunting) over 101 years. Fig.1-2 show the resulting distributions of adult animals and cumulative hunting value. 
 
-```{r distributions, fig.cap='distributions of adult animals'}
+
+```{r distributions, fig.cap='Fig.1 Distribution of predicted numbers of adult animals across simulations in 100 years'}
 
 outcome_plot
 
 ```
 
-For all analyses we assume that the three states of nature related to juvenile survival are all equally likely. Considering the expected number of adults after 100 years (in year 101), we see unsurprisingly that the number of adults is linearly and positively correlated with the juvenile survival rate: the higher the natural rate of juvenile, the more adults (Table.1). From the perspective of a hunting strategy, any of the proposed hunting strategies dramatically reduce the expected number of adults compared to the no hunting scenario. If our objective is to maximize the number of expected adults across the three evaluated states of nature, conditional on allowing hunting in at least one patch, the optimal hunting strategy is to allow hunting in patch 1, in which new recruits are hunted. The next best strategy is to allow hunting in patch three, there the mature adults are targeted, followed by hunting in patch 2 (juvenile hunting). 
+
+```{r wtf, fig.cap = 'Fig.2 Distribution of predicted cumulative hunting value across simulations'}
+
+outcome_plot_value
+
+```
+
+
+For all analyses we assume that the three states of nature related to juvenile survival are all equally likely. Considering the expected number of adults after 100 years (in year 101), we see unsurprisingly that the number of adults is linearly and positively correlated with the juvenile survival rate: the higher the natural rate of juvenile, the more adults (Table.1). From the perspective of a hunting strategy, any of the proposed hunting strategies dramatically reduce the expected number of adults compared to the no hunting scenario. If our objective is to maximize the number of expected adults across the three evaluated states of nature, conditional on allowing hunting in at least one patch, the optimal hunting strategy is to allow hunting in patch 1, in which new recruits are hunted. The next best strategy is to allow hunting in patch three, where the mature adults are targeted, followed by hunting in patch 2 (juvenile hunting). 
 
 ```{r decision table 1}
 
@@ -502,7 +558,7 @@ kable(decision_table1, caption = 'Table.1: Decision table considering numbers of
 
 ```
 
-If we instead consider the probability that there are less than 1000 adult (ages 9-15) problembeasts in the population we see similar outcomes as when considering the expected number of adults (Table.2). We do see far less of a difference in expected outcomes between no hunting and hunting, meaning that the consequences of allowing hunting of any kind may be less severe if our only objective is ensuring that more than 1000 adults are present in 100 years. We also see essentially no difference between allowing hunting in patch 2 and patch 3. Interestingly, we under the state of nature in which juvenile natural survival is 0.75 there is 0% probability of an adult population greater than 1000. 
+If we instead consider the probability that there are less than 1000 adult (ages 9-15) problembeasts in the population we see similar outcomes as when considering the expected number of adults (Table.2). We do see far less of a difference in expected outcomes between no hunting and hunting, meaning that the consequences of allowing hunting of any kind may be less severe if our only objective is ensuring that no less than 1000 adults are present in 100 years. We also see essentially no difference between allowing hunting in patch 2 and patch 3. Interestingly, we under the state of nature in which juvenile natural survival is 0.75 there is 100% probability of an adult population less than 1000. 
 
 
 ```{r decision table 2}
@@ -513,28 +569,28 @@ kable(decision_table2, caption = 'Table.2: Decision table considering the probab
 
 ## Task D
 
-Considering now the value of hunting, we can first analyze a decision table based around hunting value (Table.3). Assuming equal probability of each of the states of nature, the best option for a manager seeking to maximize hunting value in 100 years is to allow hunting in patch 3, regardless of the true state of nature. 
+Considering now the value of hunting, we can first analyze a decision table based around the cumulative hunting value over the evaluated time period (assuming a discount rate of 0; Table.3). Assuming equal probability of each of the states of nature, the best option for a manager seeking to maximize hunting value in 100 years is to allow hunting in patch 3, regardless of the true state of nature. 
 
 ```{r value table}
 
-kable(decision_table_value, digits = 2, caption = 'Table.3: Decision table considering the value derived from hunting accross three states of nature under four hunting strategies. The probabilitiy of each state of nature is the same.')
+kable(decision_table_value, digits = 2, caption = 'Table.3: Decision table considering the cumulative value derived from hunting accross three states of nature under four hunting strategies. The probabilitiy of each state of nature is the same.')
 
 ```
 
-However, the question of which strategy (conditional on allowing some hunting) is "best" depends on the objectives of management. Examining a tradeoff analysis of the probability of more than 1000 adults (P(Adults >1000): 1 - P(A < 1000)) in 100 years and the value of hunting, we see that there are clear tradeoffs between these two objectives (Fig.XX, hover over figure for caption) depending on the state of nature. The recommendation to a manager will depend on the extent to which they value hunting profits relative to P(Adults>1000). If juvenile survival is 0.7, and our only conservation objective is P(Adults >1000), then the optimal strategy is to allow hunting in patch 3, since it introduces the most value from hunting and produces the same conservation outcome as the other hunting strategies. 
+However, the question of which strategy (conditional on allowing some hunting) is "best" depends on the objectives of management. Examining a tradeoff analysis of the probability of more than 1000 adults (P(Adults >1000): 1 - P(A < 1000)) in 100 years and the value of hunting, we see that there are clear tradeoffs between these two objectives (Fig.3) depending on the state of nature. The recommendation to a manager will depend on the extent to which they value hunting profits relative to P(Adults>1000). If juvenile survival is 0.75, and our only conservation objective is P(Adults >1000), then the optimal strategy is to allow hunting in patch 3, since it introduces the most value from hunting and produces the same conservation outcome as the other hunting strategies. 
 
-If juvenile survival is 0.8, we see that allowing hunting in patch two is a dominated solution: no matter if the manager prefers conservation or hunting profits hunting in patch 2 is sub-optimal, and either hunting in patch 1 or 3 will produce better outcomes for either objective. Hunting in patch 1 provides a greater outcome for conservation, patch 3 provides a better outcome from the perspective of profits. 
+If juvenile survival is 0.8, we see that allowing hunting in patch two is a dominated solution: no matter if the manager prefers conservation or hunting profits hunting in patch 2 is effectively sub-optimal, and either hunting in patch 1 or 3 will produce better outcomes for either objective. Hunting in patch 1 provides a greater outcome for conservation, patch 3 provides a better outcome from the perspective of profits. 
 
 If juvenile survival is 0.82 we see linear tradeoffs, where the choice of which patch to hunt is strictly defined by the weighting of the objective function, with patch 3 hunting providing the greatest profits, patch 1 hunting the greatest conservation outcome, and patch 2 providing a balanced outcome between the two objectives. 
 
-```{r tradeoff, fig.cap='Tradeoff analysis of probability of more than 1000 adults vs. value of hunting over three states of nature'}
+```{r tradeoff, fig.cap='Fig.3 Tradeoff analysis of probability of more than 1000 adults vs. cumulative value of hunting over three states of nature'}
 tradeoff2
 ```
 
-We can consider this tradeoff analysis across all states of nature, assuming equal probability of the three states evaluated. Under this scenario, the expected P(Adults > 1000) and value of hunting is the average of the P(Adults > 1000) and value of hunting across the three states of nature. We see that if we are completely uncertain as to the state of nature, and all are equally likely, then we would never recommend hunting in patch 2 to a manager, since that strategy is completely dominated by the other hunting options (Fig.XX). The choice between hunting in patch 1 or 3 would then depend on the objective function of the managers. Patch 3 would be preferable if the manager favors hunting value, Patch 1 if the manager prefers conservation outcomes. We could of course repeat this exercise considering the raw number of adults as our objectives, or a three way objective function. 
+We can consider this tradeoff analysis across all states of nature, assuming equal probability of the three states evaluated. Under this scenario, the expected P(Adults > 1000) and value of hunting is the average of the P(Adults > 1000) and value of hunting across the three states of nature. We see that if we are completely uncertain as to the state of nature, and all are equally likely, then we would never recommend hunting in patch 2 to a manager, since that strategy is completely dominated by the other hunting options (Fig.4). The choice between hunting in patch 1 or 3 would then depend on the objective function of the managers. Patch 3 would be preferable if the manager favors hunting value, Patch 1 if the manager prefers conservation outcomes. We could of course repeat this exercise considering the raw number of adults as our objectives, or a three way objective function. 
 
 
-```{r tradeoff_2huh, fig.cap= 'Tradeoff analysis of probability of more than 1000 adults vs. value of hunting integrating over three states of nature'}
+```{r tradeoff_2huh, fig.cap= 'Fig.4 Tradeoff analysis of probability of more than 1000 adults vs. cumulative value of hunting integrating over three states of nature'}
 
 print(tradeoff3)
 
@@ -542,36 +598,198 @@ print(tradeoff3)
 
 ## Task E
 
-Taking this question to mean that we are interested in the value of information on s~j~, conditional on picking a harvest strategy that maximizes the expected number of adults in 100 years. Assume that all three states of nature are equally likely.The management decision on the table is which patch should be open to hunting, with the stipulation that some hunting occurs. We would measure the value of information under this scenario as the mean of the expected values of hunting under the hunting policy that maximizes the number of adults in 100 years under each state of nature, relative to the expected value of the hunting policy that maximizes the expected number of adults across all three states of nature. 
+We interpret this question to mean that we are interested in the value of information on s~j~, conditional on picking a harvest strategy that maximizes the expected number of total animals (not just adults: ages 0:15+) in 100 years, where value is defined in terms of the difference in expected hunting value. We again assume that all three states of nature are equally likely.The management decision on the table is which patch should be open to hunting, with the stipulation that some hunting occurs. We would measure the value of information under this scenario as the mean of the expected values of hunting under the hunting policy that maximizes the number of animals in 100 years under each state of nature, relative to the expected value of the hunting policy that maximizes the expected number of animals across all three states of nature. 
 
-In other words, we are comparing the hunting value of being able to choose the appropriate hunting strategy that maximizes the number of adults given perfect knowledge of the state of nature, compared to having to pick one hunting strategy that performs best in maximizing the expected number of adults in 100 years across all possible states of nature. 
-
-However, we see from Table.1 that the harvest strategy that maximizes the expected number of adults in 100 years under any state of nature is hunting in patch 1 (i.e. targeting new recruits). Therefore, with no information on the actual state of nature, we would pick hunting in patch 1 if our objective is maximizing the number of adults. But, if we had perfect information, we would also pick hunting in patch 1 under any state of nature, if the objective is maximizing the adults in 100 years. Therefore, the value of information is $0. We gain no additional management insight, and associated value, by knowing perfectly what *s~j~* is, since we would make the exact same management decision with no information on *s~j~*, if the objective is maximizing the expected number of adults in 100 years. 
-
-```{r}
+In other words, we are comparing the hunting value of being able to choose the appropriate hunting strategy that maximizes the number of animals given perfect knowledge of the state of nature, compared to having to pick one hunting strategy that performs best in maximizing the expected number of animals in 100 years across all possible evaluated states of nature. 
 
 
-# decision_table <- tidy_results %>%
-#   subset(year == 100 & hunted_patch>0) %>%
-#   group_by(hunted_patch) %>%
-#   summarize(mean_adults = mean(adults),p_morethan_1000 = mean(adults >= 1000), mean_value = mean(hunt_value)) %>%
-#   arrange(-mean_adults)
+
+
+```{r voi}
+
+
+with_information <- decision_table %>%
+  subset(hunted_patch > 0) %>%
+  group_by(s_j) %>%
+  summarise(best_strat = hunted_patch[mean_animals == max(mean_animals)],
+            val_at_best = mean_value[mean_animals == max(mean_animals)],
+            best_animals = mean_animals[mean_animals == max(mean_animals)])
+
+expected_animals_with_info <- mean(with_information$best_animals)
+
+expected_value_with_info <- mean(with_information$val_at_best)
+
+without_information <- decision_table %>%
+  subset(hunted_patch >0) %>%
+  subset(expected_animals == max(expected_animals))
+
+expected_animals_wout_info <- mean(without_information$mean_animals)
+
+expected_value_wout_info <- mean(without_information$mean_value)
+
+voi <- expected_animals_with_info - expected_animals_wout_info
 
 ```
 
+We can think of this exercise from the perspective of a hunting group debating whether to fund a graduate student to study and definitively determine the juvenile survival of problembeasts. The hunting group knows that the management body has only one objective: to maximize the expected number of animals in 100 years, given that they have to allow at least some hunting. 
 
-```{r}
+Without knowledge of the true state of nature, the manager will choose to allow hunting in patch three, which maximizes the expected number of animals in the problembeast population in 100 years while still allowing hunting (Table.3). This translates into an expected cumulative hunting value of `r expected_value_wout_info`. If the managers obtain perfect information on the juvenile survival rate, their strategy will change somewhat. If the managers know that juvenile survival is 0.75, they will allow hunting in patch 1, in order to maximize the expected number of total animals. For the other two states of nature, the managers will choose to allow hunting in patch 3. The expected cumulative hunting value of perfect information is then `r expected_value_with_info`, less than the expected value with no information. The **value of information is in fact `r round(expected_value_with_info - expected_value_wout_info,2)`**.  This is since there is now a 1/3 chance that the true value of juvenile survival will be discovered to be 0.75, resulting in lower hunting value as the club is now only allowed to hunt newborn problembeasts. 
 
-# decision_table <- tidy_results %>%
-#   subset(year == 100 & hunted_patch>0) %>%
-#   group_by(s_j,hunted_patch) %>%
-#   summarize(mean_adults = mean(adults),p_morethan_1000 = mean(adults >= 1000), mean_value = mean(hunt_value)) %>%
-#   arrange(-mean_adults) %>%
-#   ungroup() %>%
-#   group_by(s_j) %>%
-#   mutate(best_hunt = mean_adults == max(mean_adults)) %>%
-#   subset(best_hunt == T) %>%
-#   ungroup() %>%
-#   mutate(expected_value = mean(mean_value))
+So, from the perspective of the hunting club determining whether to fund the poor graduate student, their decision should be no. They are better off if the management agency does not know the true state of nature, since their expected value of hunting is greater under uncertainty. The good news for the poor graduate student is if they are a savvy negotiator, they should be able to get the hunting club to pay them up to  `r round(-1*(expected_value_with_info - expected_value_wout_info),2)` to agree not to study the rates of juvenile survival in the problembeast.
+
+```{r animal decision table}
+kable(decision_table3, caption = 'Table.3: Decision table considering numbers of animals (ages 0-15+) problembeasts across three states of nature under four hunting strategies', digits = 2)
+```
+
+```{r value decision table}
+kable(decision_table_value, caption = 'Table.4: Decision table considering cumulative value of problembeast hunting across three states of nature under four hunting strategies', digits = 2)
+```
+
+## More Functions
+
+```{r,echo=T}
+
+#' runs problembeast model
+#'
+#'\code{sim_problembeast} simulates populations of
+#'the endangered problembeast forward under
+#'different states of nature and hunting
+#'@param pb a list of problembeast population
+#'parameters
+#'@param sim_years number of years to run
+#'@param hunted_patch the patch in which hunting
+#'occurs
+#'@param s_j juvenile survival
+#'@param _value the price per hunted animal
+#'at various ages
+#'@param results blank matrix to store results
+#'@param recruits index of recruits
+#'@param juveniles index of juveniles
+#'@param adults index of all adults
+#'@param mature index of mature adults
+#'@param plus index of the plus group
+#'
+sim_problembeast <- function(pb,sim_years = 101,hunted_patch = 0,s_j = .75,
+                             recruit_value = 1, juv_value = 5, adult_value = 30,
+                             results, recruits,juveniles,adults,mature,plus, animals)
+{
+  
+  pb$s_j <- s_j #input juvenile survival
+  
+  results$year <- 1:(sim_years+1) #input yeats
+  
+  results$hunted_patch <- hunted_patch #mark hunted patch
+  
+  results$s_j <- s_j #store juvenile survival
+  
+  phi <- matrix(1, nrow = 3, ncol = sim_years)
+  
+  if (hunted_patch>0){ # If there is any hunting generate a vector of hunting survivals over time for the appropriate patch
+    
+    shape1 <- eval(parse(text = paste('pb$phi_',hunted_patch,'_shape',sep = '') ))$shape1
+    
+    shape2 <- eval(parse(text = paste('pb$phi_',hunted_patch,'_shape',sep = '') ))$shape2
+    
+    phi[hunted_patch,] <-  rbeta(sim_years,shape1 = shape1, shape2 = shape2)
+    
+    
+  }
+  
+  #Store initial conditions
+  
+  n_adults <- sum(pb$n_at_age[1, mature])
+  
+  results$adults[1] <- n_adults
+  
+  results$animals[1] <- sum(pb$n_at_age[1, animals])
+  
+  pb$n_at_age <- as.matrix(pb$n_at_age)
+  
+  for (y in 1:(sim_years)) #loop away
+  {
+    
+    # Juvenile component ----
+    
+    juv_survive <- rbinom(length(juveniles),(pb$n_at_age[y,juveniles - 1]),pb$s_j)
+    
+    juv_survive_hunting <- rbinom(length(juveniles),(juv_survive),phi[2,y])
+    
+    juv_hunted <- juv_survive - juv_survive_hunting
+    
+    pb$n_at_age[y + 1,juveniles] <- juv_survive_hunting
+    
+    # Adult component ----
+    
+    adults_survive <- rbinom(length(adults),(pb$n_at_age[y,adults - 1]),pb$s_a)
+    
+    adults_survive_hunting <- rbinom(length(adults), (adults_survive),phi[3,y])
+    
+    adults_hunted <- adults_survive - adults_survive_hunting
+    
+    pb$n_at_age[y + 1, adults] <- adults_survive_hunting
+    
+    # Plus group component ---
+    
+    enter_plus_survive <- rbinom(length(plus),(pb$n_at_age[y,plus - 1]),pb$s_a)
+    
+    enter_plus_survive_hunting <- rbinom(length(plus), (enter_plus_survive),phi[3,y])
+    
+    enter_plus_hunted <- enter_plus_survive - enter_plus_survive_hunting
+    
+    enter_plus <- enter_plus_survive_hunting
+    
+    stay_plus_survive <- rbinom(length(plus),(pb$n_at_age[y,plus]),pb$s_a)
+    
+    stay_plus_survive_hunted <- rbinom(length(plus), (stay_plus_survive),phi[3,y])
+    
+    stay_plus_hunted <- stay_plus_survive - stay_plus_survive_hunted
+    
+    stay_plus <- stay_plus_survive_hunted
+    
+    pb$n_at_age[y + 1, plus] <- enter_plus + stay_plus
+    
+    n_adults <- sum(pb$n_at_age[y + 1, mature])
+    
+    # Recruitment comonent ----
+    
+    recruits_born <- rbinom(length(recruits), n_adults, pb$b)
+    
+    recruits_survive_hunting <- rbinom(length(recruits), recruits_born,phi[1,y])
+    
+    recruits_hunted <- recruits_born - recruits_survive_hunting
+    
+    pb$n_at_age[y + 1,recruits] <- recruits_survive_hunting
+    
+    results$adults[y+1] <- n_adults
+    
+    # Process hunting ----
+    
+    hunted_in_two <- sum(juv_hunted)
+    
+    hunted_in_three <- sum(adults_hunted) + sum(enter_plus_hunted) + sum(stay_plus_hunted)
+    
+    hunted <-  hunted_in_two + hunted_in_three
+    
+    hunted_value <- hunted_in_two * juv_value + hunted_in_three * adult_value
+    
+    if (hunted_patch >1){
+      results$hunted[y] <- hunted
+      results$hunt_value[y] <- hunted_value
+    }
+    if(hunted_patch == 1)
+    {
+      results$hunted[y + 1] <- recruits_hunted
+      results$hunt_value[y+1] <- recruits_hunted * recruit_value
+    }
+    
+    results$animals[y+1] <- sum(pb$n_at_age[y + 1,animals])
+    
+  } #close year loop
+  
+  results <- results[1:sim_years,]
+  
+  return(results)
+  
+}
 
 ```
