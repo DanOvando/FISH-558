@@ -1,0 +1,10 @@
+Package: mletools
+Title: DanOvandos Maximum Likelihood Tools
+Version: 0.0.0.9000
+Authors@R: person("Dan", "Ovando", email = "dovando@bren.ucsb.edu", role = c("aut", "cre"))
+Description: This package contains functions for use in maximum likelihood problems
+Depends: R (>= 3.2.2)
+License: None
+LazyData: true
+Imports:
+  dplyr

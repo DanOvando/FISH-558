@@ -39,6 +39,7 @@ Analyze <- function()
 
   Model <- function(parm,Data)
   {
+    a <- proc.time()
     Npop <- 20
     Nsamp <- 15
     # Extract parmeters
@@ -76,6 +77,7 @@ Analyze <- function()
 
     LP <- LL + log.prior
     Modelout <- list(LP=LP,Dev=-2*LL, Monitor= c(LP,sigma,sigma.alpha,sigma.beta), yhat=exp(rnorm(length(LogPreds), LogPreds, sigma)),parm=parm)
+    show(proc.time() - a)
     return(Modelout)
   }
 
@@ -84,16 +86,16 @@ Analyze <- function()
   andres <- Model(Initial.Values,Data = MyData)
 
   #print(Initial.Values)
-  Fit <- LaplacesDemon(Model, Data=MyData, Initial.Values,Covar=NULL, Iterations=25000000,
-                       Status=10000, Thinning=20000,Algorithm="HARM")
-  plot(Fit,BurnIn=100,MyData,PDF=FALSE,Parms=NULL)
-
-  Pred <- predict(Fit,Model,MyData)
-  Pred$y <- Weights
-  plot(Pred,Style="Fitted")
-  plot(Pred,Style="Residuals")
-
-  print(Fit)
+  Fit <- LaplacesDemon(Model, Data=MyData, Initial.Values,Covar=NULL, Iterations=1e6,
+                       Status=10000, Thinning=20000,Algorithm="HARM",Specs=list(alpha.star=0.23, B = NULL))
+#   plot(Fit,BurnIn=100,MyData,PDF=FALSE,Parms=NULL)
+#
+#   Pred <- predict(Fit,Model,MyData)
+#   Pred$y <- Weights
+#   plot(Pred,Style="Fitted")
+#   plot(Pred,Style="Residuals")
+#
+#   print(Fit)
   return(Fit)
 }
 

@@ -38,6 +38,8 @@ if (Cases[1] ==1)
                  .RNG.name="base::Super-Duper", .RNG.seed=1)
   inits <- list(inits1,inits2,inits3)
 
+  browser()
+
   results <- run.jags(model=model, monitor=c("mean", "meanN","sigma","precision","true.y"),
                     data=data,n.chains=3, method="rjags", inits=inits,
                     plots=T,silent.jag=F,
